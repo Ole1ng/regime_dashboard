@@ -45,6 +45,11 @@ LVN_THRESHOLD = 0.30      # bin volume below this share of the mean = low volume
 LVN_MIN_BINS = 3          # a corridor must span at least this many bins
 INTERVAL = "5m"
 PERIOD = "1mo"
+# Candles are aggregated up from the 5m bars: 30 minutes is the classic
+# market-profile bracket, and at ~13 per session it keeps 10 sessions legible
+# on one axis where raw 5m bars would be ~1px wide.
+CANDLE_RULE = "30min"
+CANDLE_LABEL = "30m"
 
 
 # --------------------------------------------------------------------------- #
@@ -214,16 +219,50 @@ def find_lvn(bins: dict[float, float], bin_size: float = BIN_SIZE,
 # Compute
 # --------------------------------------------------------------------------- #
 
+def build_candles(frames: dict, day_keys: list, comp_days: set,
+                  rule: str = CANDLE_RULE) -> list[dict]:
+    """Aggregate the 5m bars up to `rule` candles, per session.
+
+    Resampling is anchored to each session's own first bar rather than to the
+    wall clock, so buckets line up with the 09:30 open and a session with a late
+    first print does not produce a stub candle.
+    """
+    out: list[dict] = []
+    for d in day_keys:
+        f = frames[d].sort_index()
+        if f.empty:
+            continue
+        agg = (f.resample(rule, origin="start")
+               .agg({"Open": "first", "High": "max", "Low": "min",
+                     "Close": "last", "Volume": "sum"})
+               .dropna(subset=["Open", "High", "Low", "Close"]))
+        for ts, r in agg.iterrows():
+            out.append({
+                "t": ts.strftime("%Y-%m-%d %H:%M"),
+                "d": d.isoformat(),
+                "o": round(float(r["Open"]), 2),
+                "h": round(float(r["High"]), 2),
+                "l": round(float(r["Low"]), 2),
+                "c": round(float(r["Close"]), 2),
+                "v": float(r["Volume"]),
+                "in_composite": d in comp_days,
+            })
+    return out
+
+
 def compute(bars: pd.DataFrame, spx_spot: float, spy_spot: float | None = None,
             today: date | None = None) -> dict:
-    by_day = {}
-    for ts, row in bars.iterrows():
-        by_day.setdefault(ts.date(), []).append(row)
-    day_keys = sorted(by_day)[-SESSIONS:]
+    # Slice by index date rather than accumulating rows: this keeps a real
+    # DatetimeIndex on each session frame, which resampling to candles needs.
+    if bars.empty or not isinstance(bars.index, pd.DatetimeIndex):
+        raise ValueError("no complete sessions in the SPY bar set "
+                         "(expected bars indexed by timestamp)")
+    idx_dates = bars.index.date
+    day_keys = sorted(set(idx_dates))[-SESSIONS:]
     if not day_keys:
         raise ValueError("no complete sessions in the SPY bar set")
 
-    frames = {d: pd.DataFrame(by_day[d]) for d in day_keys}
+    frames = {d: bars[idx_dates == d] for d in day_keys}
     spy_spot = float(spy_spot if spy_spot is not None
                      else frames[day_keys[-1]]["Close"].iloc[-1])
     ratio = spx_spot / spy_spot
@@ -293,6 +332,8 @@ def compute(bars: pd.DataFrame, spx_spot: float, spy_spot: float | None = None,
         "composite_high": round(comp["high"], 2) if comp["high"] else None,
         "composite_low": round(comp["low"], 2) if comp["low"] else None,
         "chart": chart,
+        "candles": build_candles(frames, day_keys, set(comp_days)),
+        "candle_interval": CANDLE_LABEL,
         "naked_pocs": naked[:6],
         "lvn_zones": lvn[:6],
         "interval": INTERVAL,

@@ -287,9 +287,34 @@ svg.chart { width: 100%; height: auto; display: block; }
 .prof-bar { fill: var(--accent-dk); }
 .prof-bar.va { fill: var(--accent); }
 .prof-poc { stroke: var(--accent); stroke-width: 1.5; }
+.prof-va { stroke: var(--fg-dim); stroke-width: 1; stroke-dasharray: 4 4; }
 .prof-spot { stroke: var(--blue); stroke-width: 1.2; }
 .prof-lvn { fill: #2a2210; }
+.prof-comp { fill: #ffffff; opacity: .028; }
 .prof-naked { fill: var(--amber); }
+.prof-naked-line { stroke: var(--amber); stroke-width: 1; stroke-dasharray: 2 5; opacity: .8; }
+.sess-sep { stroke: var(--border); stroke-width: 1; }
+
+/* Candles */
+.cdl-up { fill: var(--up); }
+.cdl-dn { fill: var(--down); }
+.cdl-up-wick { stroke: var(--up); stroke-width: 1; }
+.cdl-dn-wick { stroke: var(--down); stroke-width: 1; }
+
+.chart-legend {
+  display: flex; flex-wrap: wrap; gap: 14px;
+  margin-top: 8px; font-size: 11px; color: var(--fg-dim);
+}
+.chart-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.chart-legend .sw {
+  width: 11px; height: 11px; border-radius: 2px; display: inline-block;
+}
+.chart-legend .sw.cdl-up { background: var(--up); }
+.chart-legend .sw.cdl-dn { background: var(--down); }
+.chart-legend .sw-va { background: var(--accent); }
+.chart-legend .sw-lvn { background: #2a2210; border: 1px solid var(--border-lt); }
+.chart-legend .sw-naked { background: var(--amber); border-radius: 50%; }
+.chart-legend .sw-comp { background: #2b2823; border: 1px solid var(--border-lt); }
 
 .spark-line { fill: none; stroke: var(--blue); stroke-width: 1.5; }
 .spark-now { fill: var(--accent); }

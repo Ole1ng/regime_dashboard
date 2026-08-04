@@ -1,6 +1,6 @@
 """Regime Dashboard — local SPX regime analysis.
 
-Run:  python app.py     then open http://localhost:8010
+Run:  python app.py     then open http://localhost:8020
 
 FastAPI serves a single-page dashboard plus a small JSON API. All data is
 persisted to SQLite so the last session renders immediately on reload. Nothing
@@ -27,7 +27,7 @@ from panels import vix_structure, volume_profile
 
 BASE = Path(__file__).parent
 STATIC = BASE / "static"
-PORT = 8010
+PORT = 8020
 
 
 @asynccontextmanager

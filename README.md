@@ -19,7 +19,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Then open <http://localhost:8010>.
+Then open <http://localhost:8020>.
 
 Nothing auto-refreshes. Press **Refresh** to pull fresh data (~15 s — the SPX
 chain alone is 13 MB). Everything is persisted to SQLite, so reopening the page
@@ -42,6 +42,14 @@ and rule-based.
 | **VIX Term Structure** | Contango or backwardation — is vol supply being paid or punished | §3 |
 | **Implied Correlation** | How much single-stock energy reaches the index, and is dispersion crowded | §5 |
 | **Auction Structure** | Where participants agreed on value, and which corridors price travels fast | §4 |
+
+The auction panel uses the standard market-profile layout: 30-minute SPY candles
+on the left, the composite volume profile rotated on the right, both on **one
+shared price axis**, so the relationship between where price went and where
+value was accepted reads directly off the chart. Candles cover all 10 profiled
+sessions; the 5 the composite actually summarises are shaded. POC, VAH, VAL and
+spot run across both halves; naked POCs are drawn from the session that left
+them to the right edge; LVN corridors are shaded bands.
 
 ### The regime layer
 
@@ -121,7 +129,7 @@ regression test.
 ## Layout
 
 ```
-app.py                  FastAPI entry point (port 8010)
+app.py                  FastAPI entry point (port 8020)
 store.py                SQLite persistence, one JSON payload per panel
 panels/
   _bs.py                Black-Scholes greeks (vanna/charm/gamma/delta)
@@ -139,15 +147,22 @@ tools/
   calibrate.py          Live magnitudes vs commentary thresholds
   smoke.py              Run any panel's refresh() against live data
   check_contract.py     Assert live payloads carry every field app.js reads
+  render_check.js       Execute the renderers and validate their SVG output
 ```
 
 ## Tests
 
 ```bash
-python -m pytest panels/ -q          # 152 tests, no network
+python -m pytest panels/ -q          # 156 tests, no network
 python tools/check_contract.py       # frontend field contract (server running)
+node tools/render_check.js           # renderer output + chart geometry
 python tools/calibrate.py            # live magnitudes vs thresholds
 ```
+
+`render_check.js` runs the real renderers against live payloads under a stubbed
+DOM and checks for NaN coordinates, `undefined` in labels, unbalanced SVG tags,
+negative dimensions, and — for the auction chart — that the candle and profile
+regions stay disjoint. Those failures are invisible without it.
 
 Panel modules are pure functions over fetched data, so the whole suite runs
 offline against synthetic fixtures. Fixtures are anchored to values actually

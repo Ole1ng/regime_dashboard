@@ -259,6 +259,71 @@ def test_empty_bars_raise():
         assert "session" in str(exc)
 
 
+def test_candles_are_aggregated_to_30_minutes():
+    """Six 5m bars collapse into one 30m candle with OHLC taken correctly."""
+    rows = [(100.0, 100.5, 99.5, 100.2, 1000.0),
+            (100.2, 101.0, 100.1, 100.8, 1000.0),
+            (100.8, 100.9, 100.3, 100.4, 1000.0),
+            (100.4, 100.6, 100.0, 100.5, 1000.0),
+            (100.5, 100.7, 100.2, 100.6, 1000.0),
+            (100.6, 102.0, 100.4, 101.5, 1000.0)]     # 6 x 5m = one 30m bucket
+    day = datetime(2026, 8, 3)
+    p = vp.compute(session(day, rows), spx_spot=1015.0, spy_spot=101.5)
+    cs = p["candles"]
+    assert len(cs) == 1
+    c = cs[0]
+    assert c["o"] == 100.0            # first open
+    assert c["c"] == 101.5            # last close
+    assert c["h"] == 102.0            # max high
+    assert c["l"] == 99.5             # min low
+    assert c["v"] == 6000.0           # summed volume
+    assert c["t"] == "2026-08-03 09:30"
+    assert c["d"] == "2026-08-03"
+    assert p["candle_interval"] == "30m"
+
+
+def test_candles_split_across_buckets_and_sessions():
+    rows = [(100.0, 100.1, 99.9, 100.0, 500.0)] * 9   # 45 min -> 2 buckets
+    data = pd.concat([session(datetime(2026, 8, 3), rows),
+                      session(datetime(2026, 8, 4), rows)])
+    p = vp.compute(data, spx_spot=1000.0, spy_spot=100.0)
+    cs = p["candles"]
+    assert len(cs) == 4                                # 2 buckets x 2 sessions
+    assert [c["d"] for c in cs] == ["2026-08-03"] * 2 + ["2026-08-04"] * 2
+    assert [c["t"] for c in cs] == [
+        "2026-08-03 09:30", "2026-08-03 10:00",
+        "2026-08-04 09:30", "2026-08-04 10:00"]
+    # Buckets never straddle a session boundary.
+    for c in cs:
+        assert c["t"].startswith(c["d"])
+
+
+def test_candles_flag_the_composite_window():
+    """Candles cover all profiled sessions; only the composite ones are flagged
+    so the chart can shade the region the profile actually summarises."""
+    frames = []
+    for i in range(vp.SESSIONS):
+        d = datetime(2026, 7, 6) + timedelta(days=i)
+        frames.append(session(d, [(100.0 + i, 100.2 + i, 99.8 + i,
+                                   100.0 + i, 1000.0)] * 6))
+    p = vp.compute(pd.concat(frames), spx_spot=1090.0, spy_spot=109.0)
+    days = sorted({c["d"] for c in p["candles"]})
+    assert len(days) == vp.SESSIONS
+    flagged = sorted({c["d"] for c in p["candles"] if c["in_composite"]})
+    assert len(flagged) == vp.COMPOSITE_SESSIONS
+    assert flagged == days[-vp.COMPOSITE_SESSIONS:]
+    assert flagged[0] == p["composite_from"]
+    assert flagged[-1] == p["composite_to"]
+
+
+def test_candles_cover_the_same_price_range_as_the_sessions():
+    p = vp.compute(_three_sessions(), spx_spot=1060.0, spy_spot=106.0)
+    lo = min(c["l"] for c in p["candles"])
+    hi = max(c["h"] for c in p["candles"])
+    assert abs(lo - min(s["low"] for s in p["sessions"])) < 0.01
+    assert abs(hi - max(s["high"] for s in p["sessions"])) < 0.01
+
+
 def test_only_the_last_n_sessions_are_kept():
     frames = []
     for i in range(20):

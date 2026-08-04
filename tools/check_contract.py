@@ -16,7 +16,7 @@ import json
 import sys
 import urllib.request
 
-URL = "http://127.0.0.1:8010/api/state"
+URL = "http://127.0.0.1:8020/api/state"
 
 # panel_key -> list of required paths. "a.b" descends a dict; "a[].b" descends
 # the first element of a list.
@@ -80,8 +80,10 @@ REQUIRED = {
         "composite_val", "composite_poc_spx", "composite_vah_spx",
         "composite_val_spx", "limitation", "composite_sessions",
         "composite_from", "composite_to", "interval", "bin_size",
-        "naked_pocs", "lvn_zones",
+        "naked_pocs", "lvn_zones", "n_sessions", "candle_interval",
         "chart[].price", "chart[].price_spx", "chart[].volume", "chart[].share",
+        "candles[].t", "candles[].d", "candles[].o", "candles[].h",
+        "candles[].l", "candles[].c", "candles[].in_composite",
         "commentary.headline", "commentary.sentences",
     ],
 }

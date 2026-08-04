@@ -563,60 +563,159 @@ function renderCorrelation(body, p) {
 // Volume profile
 // --------------------------------------------------------------------------
 
-function profileChart(p) {
+// 30-minute candles on the left and the composite volume profile rotated on
+// the right, sharing one price axis — the standard market-profile layout, so
+// the relationship between where price went and where value was accepted reads
+// directly off the chart.
+function auctionChart(p) {
   const bins = p.chart || [];
-  if (!bins.length) return "";
-  const W = 1000, H = 300, padL = 60, padR = 120, padT = 12, padB = 12;
-  const maxV = Math.max(...bins.map((b) => b.volume)) || 1;
-  const prices = bins.map((b) => b.price);
-  const lo = Math.min(...prices), hi = Math.max(...prices);
-  const range = (hi - lo) || 1;
-  const Y = (price) => padT + (1 - (price - lo) / range) * (H - padT - padB);
-  const barH = Math.max(1.2, (H - padT - padB) / bins.length * 0.9);
+  const candles = p.candles || [];
+  if (!bins.length && !candles.length) return "";
+
+  const W = 1000, H = 430;
+  const padL = 56, padT = 16, padB = 42;      // padL leaves room for price labels
+  const cx0 = padL, cx1 = 648;                // candle region
+  const px0 = 664, px1 = 878;                 // profile region
+  const labelX = px1 + 8;                     // right-hand level labels
+
+  // --- shared price scale over both charts ------------------------------- //
+  const priceVals = [];
+  candles.forEach((c) => { priceVals.push(c.h, c.l); });
+  bins.forEach((b) => priceVals.push(b.price));
+  [p.composite_poc, p.composite_vah, p.composite_val, p.spy_spot]
+    .forEach((v) => { if (v != null) priceVals.push(v); });
+  (p.naked_pocs || []).forEach((n) => priceVals.push(n.spy));
+  if (!priceVals.length) return "";
+  let lo = Math.min(...priceVals), hi = Math.max(...priceVals);
+  const pad = (hi - lo) * 0.04 || 0.5;
+  lo -= pad; hi += pad;
+  const Y = (v) => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
 
   let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" ` +
-    `aria-label="Composite volume profile with value area, POC and low-volume nodes">`;
+    `aria-label="Thirty-minute SPY candles beside the composite volume profile, ` +
+    `sharing one price axis, with value area, naked POCs and low-volume nodes">`;
 
+  // --- price gridlines --------------------------------------------------- //
+  for (let g = 0; g <= 5; g++) {
+    const v = lo + (hi - lo) * g / 5;
+    svg += `<line class="curve-grid" x1="${cx0}" y1="${Y(v)}" x2="${px1}" y2="${Y(v)}"/>`;
+    svg += `<text class="curve-lbl" x="${padL - 6}" y="${Y(v) + 3}" ` +
+      `text-anchor="end">${v.toFixed(2)}</text>`;
+  }
+
+  // --- LVN corridors span both charts ------------------------------------ //
   (p.lvn_zones || []).forEach((z) => {
     const y1 = Y(z.hi), y2 = Y(z.lo);
-    svg += `<rect class="prof-lvn" x="${padL}" y="${y1}" width="${W - padL - padR}" ` +
-      `height="${Math.max(y2 - y1, 1)}"><title>LVN ${z.lo}–${z.hi} · ` +
-      `${Math.round(z.mean_volume_share * 100)}% of average volume</title></rect>`;
+    svg += `<rect class="prof-lvn" x="${cx0}" y="${y1}" width="${px1 - cx0}" ` +
+      `height="${Math.max(y2 - y1, 1)}"><title>LVN corridor ${z.lo}–${z.hi} ` +
+      `(${Math.round(z.lo_spx)}–${Math.round(z.hi_spx)} SPX) · ` +
+      `${Math.round(z.mean_volume_share * 100)}% of average volume — price ` +
+      `travels through fast</title></rect>`;
   });
 
-  bins.forEach((b) => {
-    const w = (b.volume / maxV) * (W - padL - padR);
-    const inVA = p.composite_val != null && p.composite_vah != null &&
-      b.price >= p.composite_val && b.price <= p.composite_vah;
-    svg += `<rect class="prof-bar ${inVA ? "va" : ""}" x="${padL}" ` +
-      `y="${Y(b.price) - barH / 2}" width="${Math.max(w, 0.5)}" height="${barH}">` +
-      `<title>${b.price.toFixed(2)} (${Math.round(b.price_spx)} SPX) · ` +
-      `${(b.share * 100).toFixed(2)}% of volume</title></rect>`;
-  });
+  // --- candles ----------------------------------------------------------- //
+  const n = candles.length;
+  const sessionX = {};                        // session date -> first candle x
+  if (n) {
+    const cw = (cx1 - cx0) / n;
+    const bodyW = Math.max(1.2, Math.min(cw * 0.68, 9));
 
+    // Shade the sessions the composite profile actually summarises.
+    const compIdx = candles.map((c, i) => (c.in_composite ? i : -1))
+      .filter((i) => i >= 0);
+    if (compIdx.length) {
+      const x = cx0 + compIdx[0] * cw;
+      svg += `<rect class="prof-comp" x="${x}" y="${padT}" ` +
+        `width="${(compIdx[compIdx.length - 1] + 1) * cw + cx0 - x}" ` +
+        `height="${H - padT - padB}"><title>Sessions in the composite ` +
+        `profile (${esc(p.composite_from)} → ${esc(p.composite_to)})</title></rect>`;
+    }
+
+    let lastDay = null;
+    candles.forEach((c, i) => {
+      const xc = cx0 + i * cw + cw / 2;
+      if (c.d !== lastDay) {
+        if (lastDay !== null)
+          svg += `<line class="sess-sep" x1="${cx0 + i * cw}" y1="${padT}" ` +
+            `x2="${cx0 + i * cw}" y2="${H - padB}"/>`;
+        sessionX[c.d] = cx0 + i * cw;
+        lastDay = c.d;
+      }
+      const up = c.c >= c.o;
+      const k = up ? "cdl-up" : "cdl-dn";
+      const yO = Y(c.o), yC = Y(c.c);
+      const top = Math.min(yO, yC);
+      const bh = Math.max(Math.abs(yC - yO), 0.8);
+      svg += `<line class="${k}-wick" x1="${xc}" y1="${Y(c.h)}" x2="${xc}" ` +
+        `y2="${Y(c.l)}"/>`;
+      svg += `<rect class="${k}" x="${xc - bodyW / 2}" y="${top}" ` +
+        `width="${bodyW}" height="${bh}"><title>${esc(c.t)}  O ${c.o.toFixed(2)} ` +
+        `H ${c.h.toFixed(2)} L ${c.l.toFixed(2)} C ${c.c.toFixed(2)}</title></rect>`;
+    });
+
+    // Date axis — one label per session, thinned if they would collide.
+    const days = Object.keys(sessionX);
+    const every = Math.ceil(days.length / 10);
+    days.forEach((d, i) => {
+      if (i % every) return;
+      svg += `<text class="curve-lbl" x="${sessionX[d] + cw / 2}" ` +
+        `y="${H - padB + 15}" text-anchor="middle">${esc(d.slice(5))}</text>`;
+    });
+    svg += `<text class="curve-lbl" x="${cx0}" y="${H - padB + 30}">` +
+      `${esc(p.candle_interval || "30m")} candles · ${n} bars · ` +
+      `${days.length} sessions</text>`;
+  }
+
+  // --- volume profile ---------------------------------------------------- //
+  if (bins.length) {
+    const maxV = Math.max(...bins.map((b) => b.volume)) || 1;
+    const barH = Math.max(1.2, (H - padT - padB) / bins.length * 0.92);
+    bins.forEach((b) => {
+      const w = (b.volume / maxV) * (px1 - px0);
+      const inVA = p.composite_val != null && p.composite_vah != null &&
+        b.price >= p.composite_val && b.price <= p.composite_vah;
+      svg += `<rect class="prof-bar ${inVA ? "va" : ""}" x="${px0}" ` +
+        `y="${Y(b.price) - barH / 2}" width="${Math.max(w, 0.5)}" height="${barH}">` +
+        `<title>${b.price.toFixed(2)} (${Math.round(b.price_spx)} SPX) · ` +
+        `${(b.share * 100).toFixed(2)}% of composite volume</title></rect>`;
+    });
+    svg += `<text class="curve-lbl" x="${px0}" y="${H - padB + 15}">volume at price` +
+      `</text>`;
+  }
+
+  // --- level overlays across both charts --------------------------------- //
   const mark = (price, klass, label, colour) => {
     if (price == null) return "";
     const y = Y(price);
-    return `<line class="${klass}" x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}"/>` +
-      `<text class="curve-lbl" x="${W - padR + 6}" y="${y + 3}" fill="${colour}">` +
+    return `<line class="${klass}" x1="${cx0}" y1="${y}" x2="${px1}" y2="${y}"/>` +
+      `<text class="curve-lbl" x="${labelX}" y="${y + 3}" fill="${colour}">` +
       `${label} ${price.toFixed(2)}</text>`;
   };
+  svg += mark(p.composite_vah, "prof-va", "VAH", "#9c8e76");
+  svg += mark(p.composite_val, "prof-va", "VAL", "#9c8e76");
   svg += mark(p.composite_poc, "prof-poc", "POC", "#ff9e1b");
   svg += mark(p.spy_spot, "prof-spot", "spot", "#41c8ff");
 
-  [["VAH", p.composite_vah], ["VAL", p.composite_val]].forEach(([lbl, v]) => {
-    if (v == null) return;
-    svg += `<text class="curve-lbl" x="${padL - 6}" y="${Y(v) + 3}" text-anchor="end">` +
-      `${lbl} ${v.toFixed(2)}</text>`;
+  // Naked POCs run from the session that left them to the right edge, so the
+  // unfinished business is visible where it was created.
+  (p.naked_pocs || []).forEach((nk) => {
+    const y = Y(nk.spy);
+    const x = sessionX[nk.date] != null ? sessionX[nk.date] : cx0;
+    svg += `<line class="prof-naked-line" x1="${x}" y1="${y}" x2="${px1}" y2="${y}"/>`;
+    svg += `<circle class="prof-naked" cx="${x}" cy="${y}" r="3.5">` +
+      `<title>Naked POC ${nk.spy.toFixed(2)} (${Math.round(nk.spx)} SPX) left on ` +
+      `${nk.date}, never traded back through</title></circle>`;
   });
 
-  (p.naked_pocs || []).forEach((n) => {
-    svg += `<circle class="prof-naked" cx="${padL - 16}" cy="${Y(n.spy)}" r="4">` +
-      `<title>Naked POC ${n.spy.toFixed(2)} (${Math.round(n.spx)} SPX) from ` +
-      `${n.date}</title></circle>`;
-  });
-
-  svg += `</svg>`;
+  svg += `</svg>` +
+    `<div class="chart-legend">` +
+    `<span><i class="sw cdl-up"></i>up candle</span>` +
+    `<span><i class="sw cdl-dn"></i>down candle</span>` +
+    `<span><i class="sw sw-va"></i>value area</span>` +
+    `<span><i class="sw sw-lvn"></i>LVN corridor</span>` +
+    `<span><i class="sw sw-naked"></i>naked POC</span>` +
+    `<span><i class="sw sw-comp"></i>composite window</span>` +
+    `</div>`;
   return svg;
 }
 
@@ -655,11 +754,13 @@ function renderProfile(body, p) {
     : `<p class="empty-note">No low-volume corridors detected.</p>`;
 
   body.innerHTML = commentaryBlock(p.commentary) + cards +
+    `<div class="row">${auctionChart(p)}</div>` +
     `<div class="row cards cards-2"><div>${naked}</div><div>${lvn}</div></div>` +
-    `<div class="row">${profileChart(p)}</div>` +
     `<div class="footnote">${esc(p.limitation || "")} ` +
-    `${p.composite_sessions} sessions ${esc(p.composite_from)} → ` +
-    `${esc(p.composite_to)}, ${esc(p.interval)} bars, $${p.bin_size} bins.</div>`;
+    `Candles cover ${p.n_sessions} sessions; the profile and its value area ` +
+    `summarise the shaded ${p.composite_sessions} ` +
+    `(${esc(p.composite_from)} → ${esc(p.composite_to)}). ` +
+    `Built from ${esc(p.interval)} bars, $${p.bin_size} price bins.</div>`;
 }
 
 // --------------------------------------------------------------------------
