@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Regime Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">▌</span>
+      <h1>REGIME DASHBOARD</h1>
+    </div>
+
+    <nav class="tabs" role="tablist" aria-label="Dashboard sections">
+      <button class="tab active" role="tab" data-tab="tab1"
+              aria-selected="true" aria-controls="panel-tab1" id="tabbtn-tab1">
+        SPX REGIME
+      </button>
+      <button class="tab" role="tab" data-tab="tab2"
+              aria-selected="false" aria-controls="panel-tab2" id="tabbtn-tab2">
+        TAB 2
+      </button>
+      <button class="tab" role="tab" data-tab="tab3"
+              aria-selected="false" aria-controls="panel-tab3" id="tabbtn-tab3">
+        TAB 3
+      </button>
+    </nav>
+
+    <div class="controls" role="group" aria-label="Manual data refresh">
+      <button id="btn-tab1" type="button" class="btn">
+        <span class="btn-label">Refresh</span>
+      </button>
+    </div>
+  </header>
+
+  <div id="status-line" class="status-line" role="status" aria-live="polite"></div>
+
+  <main id="main">
+
+    <!-- ===================== TAB 1 — SPX REGIME ===================== -->
+    <section class="tabpanel active" id="panel-tab1" role="tabpanel"
+             aria-labelledby="tabbtn-tab1">
+      <div class="grid">
+
+        <!-- Regime banner (full width, top) -->
+        <section class="panel panel-full panel-regime" id="panel-regime"
+                 aria-labelledby="h-regime">
+          <div class="panel-head">
+            <h2 id="h-regime">Regime</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- Calendar timeline -->
+        <section class="panel panel-full" id="panel-calendar"
+                 aria-labelledby="h-calendar">
+          <div class="panel-head">
+            <h2 id="h-calendar">Expiration Calendar</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- SPX gamma (primary, wide) -->
+        <section class="panel panel-two-thirds" id="panel-gamma_spx"
+                 aria-labelledby="h-gamma_spx">
+          <div class="panel-head">
+            <h2 id="h-gamma_spx">SPX Dealer Positioning</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- SPY gamma (cross-check, narrow) -->
+        <section class="panel panel-third" id="panel-gamma_spy"
+                 aria-labelledby="h-gamma_spy">
+          <div class="panel-head">
+            <h2 id="h-gamma_spy">SPY Cross-Check</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- VIX term structure -->
+        <section class="panel panel-half" id="panel-vix_structure"
+                 aria-labelledby="h-vix_structure">
+          <div class="panel-head">
+            <h2 id="h-vix_structure">VIX Term Structure</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- Implied correlation -->
+        <section class="panel panel-half" id="panel-correlation"
+                 aria-labelledby="h-correlation">
+          <div class="panel-head">
+            <h2 id="h-correlation">Implied Correlation</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- Volume profile -->
+        <section class="panel panel-full" id="panel-volume_profile"
+                 aria-labelledby="h-volume_profile">
+          <div class="panel-head">
+            <h2 id="h-volume_profile">Auction Structure</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- Caveats (collapsed by default) -->
+        <section class="panel panel-full" id="panel-caveats" aria-labelledby="h-caveats">
+          <div class="panel-head">
+            <h2 id="h-caveats">What this can and cannot do</h2>
+          </div>
+          <div class="panel-body">
+            <details class="caveats">
+              <summary>Read this before trading off the panel</summary>
+              <ul>
+                <li><strong>The strong result is on volatility, not direction.</strong>
+                  Dealer gamma relates well to forward <em>realised vol</em> and to
+                  mean-reversion versus trend character. Its relationship to forward
+                  <em>returns</em> is weak.</li>
+                <li><strong>Direction comes from the drift layer.</strong> Charm and
+                  vanna are genuinely directional, but they are a two-week flow with a
+                  known expiry date, not a thesis.</li>
+                <li><strong>The dealer positioning assumption is the largest error
+                  source.</strong> Everything here assumes dealers are long calls and
+                  short puts. That is a heuristic, not a measurement, and every number
+                  downstream inherits it.</li>
+                <li><strong>Levels are only as good as the open interest behind
+                  them</strong>, and open interest changes intraday. A stale map is
+                  worse than no map because it is confidently wrong.</li>
+                <li><strong>These are probability tilts, not signals.</strong>
+                  Realistically this moves a 50/50 to roughly 57/43 on the volatility
+                  regime, and less on direction. Position sizing and invalidation
+                  levels do more work than the analysis does.</li>
+                <li><strong>0DTE has changed the picture.</strong> A large share of SPX
+                  gamma is born and dies within a session, so the static profile is
+                  less durable than it was before 2022.</li>
+                <li><strong>The auction profile is regular-hours SPY.</strong> No free
+                  intraday ES source exists, so the overnight auction is missing.</li>
+              </ul>
+            </details>
+          </div>
+        </section>
+
+      </div>
+    </section>
+
+    <!-- ===================== TAB 2 — reserved ===================== -->
+    <!-- The user will be building on this project and adding to these tabs.
+         Adding one means three things: a nav button above carrying
+         data-tab="tabN", a tabpanel section here with id="panel-tabN", and a
+         render function registered in the RENDERERS map in app.js. Tab
+         switching itself is generic and needs no change. -->
+    <section class="tabpanel" id="panel-tab2" role="tabpanel"
+             aria-labelledby="tabbtn-tab2" hidden>
+      <div class="grid">
+        <section class="panel panel-full placeholder">
+          <div class="panel-head"><h2>Tab 2</h2></div>
+          <div class="panel-body">
+            <p class="empty-note">Reserved — coming soon.</p>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- ===================== TAB 3 — reserved ===================== -->
+    <section class="tabpanel" id="panel-tab3" role="tabpanel"
+             aria-labelledby="tabbtn-tab3" hidden>
+      <div class="grid">
+        <section class="panel panel-full placeholder">
+          <div class="panel-head"><h2>Tab 3</h2></div>
+          <div class="panel-body">
+            <p class="empty-note">Reserved — coming soon.</p>
+          </div>
+        </section>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <p>Local offline dashboard &middot; data persists between sessions &middot;
+      nothing auto-refreshes &middot; assumes dealers long calls / short puts</p>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
