@@ -1,6 +1,6 @@
 """Composite sentiment: the synthesis layer over every other Tab 2 panel.
 
-A pure function of the six panels that precede it, in the same way ``regime.py``
+A pure function of the panels that precede it, in the same way ``regime.py``
 is a pure function of the Tab 1 panels — it performs no fetching and reads
 whatever those panels left in the store, including stale payloads sitting behind
 an error badge.
@@ -15,12 +15,17 @@ three genuinely directional inputs (spot versus the flip level, net delta
 exposure, and the asymmetry of the call and put walls), while the gamma *regime*
 acts as a modifier that flags amplification risk and reduces confidence.
 
-**Short interest is fuel, not a direction either.** A heavily shorted name that
+**Short interest is deliberately not in the blend.** A heavily shorted name that
 is rising has squeeze potential; the identical short interest on a name that is
-falling means the shorts are winning. The squeeze sub-score is therefore signed
-by realised momentum rather than assumed bullish.
+falling means the shorts are winning. It is fuel, not a direction, and the only
+way to force it into a directional sub-score is to sign it by something else —
+which is inventing a direction rather than measuring one. Short interest is
+therefore reported as potential in its own panel, and reaches the composite only
+as a *divergence* (heavy short float against negative dealer gamma), where it
+belongs. Note that the Finviz payload it arrives on is still read here: the
+analyst sub-score and several divergence rules come off the same snapshot.
 
-The single number is navigation, not a verdict. Six loosely-correlated sentiment
+The single number is navigation, not a verdict. Five loosely-correlated sentiment
 proxies blended together is a summary — the sub-score breakdown and, above all,
 the divergences between them are the actual output.
 """
@@ -34,12 +39,11 @@ import statistics
 # --------------------------------------------------------------------------- #
 
 WEIGHTS = {
-    "vol": 25,          # options: the only input where money is at risk
-    "positioning": 20,  # dealer hedging pressure and level structure
-    "news": 15,
-    "social": 15,
-    "squeeze": 15,
-    "analyst": 10,
+    "vol": 29,          # options: the only input where money is at risk
+    "positioning": 23,  # dealer hedging pressure and level structure
+    "news": 18,
+    "social": 18,
+    "analyst": 12,
 }
 
 LABELS = {
@@ -47,7 +51,6 @@ LABELS = {
     "positioning": "Dealer positioning",
     "news": "News tone",
     "social": "Retail chatter",
-    "squeeze": "Short interest",
     "analyst": "Analyst view",
 }
 
@@ -74,7 +77,7 @@ MISSING_PENALTY = 15
 DIVERGENCE_PENALTY = 10
 DIVERGENCE_PENALTY_CAP = 40
 
-CAVEAT = ("A blend of six loosely-correlated sentiment proxies. Read the "
+CAVEAT = ("A blend of five loosely-correlated sentiment proxies. Read the "
           "breakdown and the divergences, not the number.")
 
 PANEL_KEYS = ("t2_positioning", "t2_vol", "t2_news", "t2_social",
@@ -278,36 +281,6 @@ def _social_score(p: dict | None) -> tuple[float | None, str, float]:
     return score, reading, factor
 
 
-def _squeeze_score(p: dict | None) -> tuple[float | None, str]:
-    """Squeeze potential, signed by realised momentum — see the module docstring."""
-    if not p:
-        return None, "no short-interest data"
-    short_float = p.get("short_float")
-    dtc = p.get("days_to_cover")
-    if short_float is None and dtc is None:
-        return None, "no short-interest data"
-
-    potential = 0.0
-    if short_float is not None:
-        potential += 0.65 * _clamp((short_float - 0.05) / 0.20, 0.0, 1.0)
-    if dtc is not None:
-        potential += 0.35 * _clamp((dtc - 2.0) / 5.0, 0.0, 1.0)
-
-    momentum = p.get("perf_month")
-    if momentum is None:
-        # Without a direction, short interest is genuinely ambiguous.
-        return 50.0, f"{short_float:.1%} of float short, direction unknown" \
-            if short_float is not None else "short interest, direction unknown"
-
-    sign = _clamp(momentum / 0.05)
-    score = 50.0 + 45.0 * potential * sign
-
-    reading = (f"{short_float:.1%} of float short" if short_float is not None
-               else f"{dtc:.1f} days to cover")
-    reading += f", {momentum:+.1%} on the month"
-    return score, reading
-
-
 def _analyst_score(p: dict | None) -> tuple[float | None, str]:
     if not p:
         return None, "no analyst data"
@@ -333,7 +306,11 @@ def _analyst_score(p: dict | None) -> tuple[float | None, str]:
 
 def compute(panels: dict, symbol: str,
             history: list[dict] | None = None) -> dict:
-    """Pure: the six Tab 2 panels -> composite payload."""
+    """Pure: the six Tab 2 panels -> composite payload.
+
+    Six panels feed five sub-scores: ``t2_squeeze`` supplies the analyst view and
+    several divergence rules, but no directional vote of its own.
+    """
     pos = _payload(panels, "t2_positioning")
     vol = _payload(panels, "t2_vol")
     news = _payload(panels, "t2_news")
@@ -345,7 +322,6 @@ def compute(panels: dict, symbol: str,
     s_vol, r_vol = _vol_score(vol)
     s_news, r_news, f_news = _news_score(news)
     s_social, r_social, f_social = _social_score(social)
-    s_squeeze, r_squeeze = _squeeze_score(squeeze)
     s_analyst, r_analyst = _analyst_score(squeeze)
 
     votes = [
@@ -353,7 +329,6 @@ def compute(panels: dict, symbol: str,
         _vote("positioning", r_pos, s_pos),
         _vote("news", r_news, s_news),
         _vote("social", r_social, s_social),
-        _vote("squeeze", r_squeeze, s_squeeze),
         _vote("analyst", r_analyst, s_analyst),
     ]
 

@@ -16,12 +16,18 @@ This panel supplies the other half from three free sources:
     loudly for a small cap with retail enthusiasm behind it.
 
 EDGAR requires a declared User-Agent carrying a contact address; sending a
-browser UA is against its published policy and gets blocked. The ticker→CIK map
-is a ~1 MB file covering 10,396 symbols, so it is cached rather than refetched.
+browser UA is against its published policy and gets blocked. That address is
+read from the ``SEC_USER_AGENT`` environment variable rather than hardcoded, so
+the repository carries no contact details of its own and every user declares
+their own traffic — see ``.env.example``. Leaving it unset is supported: the
+filings block reports itself unavailable and the rest of the panel still works.
+The ticker→CIK map is a ~1 MB file covering 10,396 symbols, so it is cached
+rather than refetched.
 """
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import date, datetime, timedelta, timezone
 
@@ -32,11 +38,7 @@ SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
 SEC_ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{acc}/{doc}"
 
-# SEC policy requires a descriptive UA with a contact address. Not optional.
-_SEC_HEADERS = {
-    "User-Agent": "regime-dashboard/1.0 redacted@example.com",
-    "Accept-Encoding": "gzip, deflate",
-}
+SEC_UA_ENV = "SEC_USER_AGENT"
 
 SEC_TIMEOUT = 15.0
 MAX_FILINGS = 20
@@ -97,6 +99,27 @@ def refresh(symbol: str, chain_json: dict | None = None,
 # EDGAR
 # --------------------------------------------------------------------------- #
 
+class SECNotConfigured(RuntimeError):
+    """No contact address declared, so EDGAR must not be called."""
+
+
+def _sec_contact() -> str:
+    return os.environ.get(SEC_UA_ENV, "").strip()
+
+
+def _sec_headers() -> dict:
+    """SEC policy requires a descriptive UA with a contact address.
+
+    Read at call time rather than at import so that ``.env`` loading order never
+    matters and tests can set the variable without reimporting the module.
+    """
+    contact = _sec_contact()
+    if not contact:
+        raise SECNotConfigured(
+            f"{SEC_UA_ENV} is not set — see .env.example.")
+    return {"User-Agent": contact, "Accept-Encoding": "gzip, deflate"}
+
+
 _CIK_CACHE: dict[str, str] = {}
 
 # Optional persistence hooks, injected by app.py at startup so this module has
@@ -120,7 +143,8 @@ def _cik_map(force: bool = False) -> dict[str, str]:
             _CIK_CACHE = cached
             return _CIK_CACHE
 
-    resp = requests.get(SEC_TICKERS_URL, headers=_SEC_HEADERS, timeout=SEC_TIMEOUT)
+    resp = requests.get(SEC_TICKERS_URL, headers=_sec_headers(),
+                        timeout=SEC_TIMEOUT)
     resp.raise_for_status()
     _CIK_CACHE = {row["ticker"].upper(): str(row["cik_str"]).zfill(10)
                   for row in resp.json().values()}
@@ -139,13 +163,19 @@ def _filings(symbol: str, security_type: str | None) -> dict:
     if security_type and security_type.lower() not in ("stock", "equity", ""):
         return {"available": False, "reason": f"{security_type} — no issuer filings",
                 "recent": []}
+    # Checked here as well as in _sec_headers so the panel reports something
+    # actionable rather than the bare exception name the handler below produces.
+    if not _sec_contact():
+        return {"available": False,
+                "reason": f"{SEC_UA_ENV} not set — see .env.example",
+                "recent": []}
     try:
         cik = _cik_map().get(symbol.upper())
         if not cik:
             return {"available": False, "reason": "no CIK on file", "recent": []}
 
         resp = requests.get(SEC_SUBMISSIONS_URL.format(cik=cik),
-                            headers=_SEC_HEADERS, timeout=SEC_TIMEOUT)
+                            headers=_sec_headers(), timeout=SEC_TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:

@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,6 +34,11 @@ from panels import (_finviz, ticker_events, ticker_news, ticker_positioning,
 BASE = Path(__file__).parent
 STATIC = BASE / "static"
 PORT = 8020
+
+# Only SEC_USER_AGENT lives here today — see .env.example. Safe to load after
+# the panels are imported because ticker_events reads the variable at call time
+# rather than binding it at import.
+load_dotenv(BASE / ".env")
 
 # Tickers are 1-5 letters, optionally with a dot or dash class suffix (BRK.B).
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z.\-]{0,5}$")

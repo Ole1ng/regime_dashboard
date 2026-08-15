@@ -5,6 +5,7 @@ scipy>=1.11
 pandas>=2.0
 requests>=2.31
 yfinance>=0.2.40
+python-dotenv>=1.0
 # Tab 2 (ticker sentiment)
 beautifulsoup4>=4.12
 feedparser>=6.0

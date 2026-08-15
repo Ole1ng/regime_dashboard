@@ -22,10 +22,26 @@ section of it. The verified data sources are in
 
 ```bash
 pip install -r requirements.txt
+cp .env.example .env      # optional — see below
 python app.py
 ```
 
 Then open <http://localhost:8020>.
+
+### One optional setting
+
+SEC EDGAR requires every automated request to declare a contact address it can
+reach you on; requests without one get a 403 and a ~10-minute IP block. So the
+address is yours to supply rather than something the repo ships:
+
+```bash
+SEC_USER_AGENT="regime-dashboard/1.0 you@example.com"
+```
+
+Put it in `.env` (gitignored) or export it in your shell. **Leaving it unset is
+supported** — the Earnings & Catalysts panel reports SEC filings as unavailable,
+its earnings date and implied-move analysis still work, and no other panel is
+affected. Nothing else in the project reads the environment.
 
 Nothing auto-refreshes. On Tab 1, press **Refresh** to pull fresh data (~15 s —
 the SPX chain alone is 13 MB). On Tab 2, type a ticker and press **Analyse**
@@ -113,7 +129,7 @@ news rows), and one yfinance history (realised vol, post-earnings moves).
 
 | Panel | Question it answers |
 |---|---|
-| **Composite Sentiment** | Where do six independent reads land, how much do they agree, and **where do they conflict** |
+| **Composite Sentiment** | Where do five independent reads land, how much do they agree, and **where do they conflict** |
 | **Dealer Positioning** | The Tab 1 gamma engine pointed at a single name — walls, flip level, OI gravity |
 | **Options & Volatility** | 25Δ skew, put/call on book and flow, term structure, IV vs realised, max pain |
 | **Squeeze & Ownership** | Short float and days to cover, institutional and insider holdings *and changes*, analyst consensus vs price |
@@ -146,9 +162,15 @@ has a regression test that fails if someone "simplifies" it later.
   Measured at exactly `+1.000000` for WEN, NVDA and TSLA. It measures the size
   of the hedging requirement, never its direction.
 
-- **Short interest is fuel, not a direction.** A heavily shorted name that is
-  rising has squeeze potential; the identical short interest on a falling name
-  means the shorts are winning. The sub-score is signed by realised momentum.
+- **Short interest is fuel, not a direction** — which is why it is not in the
+  composite at all. A heavily shorted name that is rising has squeeze potential;
+  the identical short interest on a falling name means the shorts are winning.
+  The only way to force it into a directional sub-score is to sign it by
+  something else, which invents a direction rather than measuring one. It is
+  scored as potential in its own panel, and reaches the composite solely as the
+  squeeze-fuel divergence. Note the Finviz snapshot it arrives on is still read
+  by the composite — the analyst sub-score and several divergence rules come off
+  the same page.
 
 ### Trend metrics need history
 
@@ -292,8 +314,8 @@ python tools/smoke.py t2 NVDA WEN QQQ           # Tab 2 across three shapes
 
 The three smoke symbols are chosen to exercise different shapes: NVDA is a deep,
 dense chain; WEN is a low-priced small cap with a thin chain, a 34% short float
-and an activist 13D; QQQ is an ETF, which has no issuer filings and no short
-interest, so it exercises the weight-renormalisation path.
+and an activist 13D; QQQ is an ETF, which has no issuer filings and no Finviz
+analyst coverage, so it exercises the weight-renormalisation path.
 
 Tab 2's contract check is opt-in because its panels hold no payload until a
 ticker has been analysed — requiring them by default would fail the Tab 1 check

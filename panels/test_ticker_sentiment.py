@@ -6,8 +6,8 @@ design choice later:
   * gamma regime must NOT become a directional input (test_gamma_regime_*),
   * net DEX must NOT become one either — under this project's sign convention
     it is identically equal to gross DEX (test_dex_*),
-  * short interest must be signed by momentum rather than assumed bullish
-    (test_squeeze_*),
+  * short interest must NOT become a directional sub-score — it reaches the
+    composite only as a divergence (test_short_interest_*),
   * a missing panel must renormalise the weights rather than score 50
     (test_weights_*).
 
@@ -143,32 +143,32 @@ def test_positioning_shrinks_toward_neutral_on_a_single_input():
 
 
 # --------------------------------------------------------------------------- #
-# Squeeze: fuel, not direction
+# Short interest: fuel, and therefore not a sub-score at all
 # --------------------------------------------------------------------------- #
 
-def test_squeeze_is_bullish_only_when_the_stock_is_rising():
-    up = squeeze(short_float=0.34, days_to_cover=5.0, perf_month=0.15)
-    down = squeeze(short_float=0.34, days_to_cover=5.0, perf_month=-0.15)
-    s_up = sub(cs.compute(panels(t2_squeeze=up), "XYZ"), "squeeze")["score"]
-    s_down = sub(cs.compute(panels(t2_squeeze=down), "XYZ"), "squeeze")["score"]
-    # Identical short interest, opposite readings: shorts covering vs winning.
-    assert s_up > 60 and s_down < 40
+def test_short_interest_is_not_a_subscore():
+    keys = {s["key"] for s in cs.compute(panels(), "XYZ")["subscores"]}
+    assert "squeeze" not in keys
+    assert keys == set(cs.WEIGHTS)
 
 
-def test_low_short_interest_is_neutral_regardless_of_momentum():
-    for perf in (0.20, -0.20):
-        s = sub(cs.compute(panels(t2_squeeze=squeeze(short_float=0.01,
-                                                     days_to_cover=0.5,
-                                                     perf_month=perf)), "XYZ"),
-                "squeeze")["score"]
-        assert abs(s - 50) < 1.0
+def test_short_interest_does_not_move_the_composite():
+    # Same tape, same everything, 1% vs 34% of the float short. Signing that by
+    # momentum was inventing a direction, so the blend must not react to it.
+    for perf in (0.15, -0.15, None):
+        light = cs.compute(panels(t2_squeeze=squeeze(
+            short_float=0.01, days_to_cover=0.5, perf_month=perf)), "XYZ")
+        heavy = cs.compute(panels(t2_squeeze=squeeze(
+            short_float=0.34, days_to_cover=8.0, perf_month=perf)), "XYZ")
+        assert light["composite"] == heavy["composite"]
 
 
-def test_squeeze_is_neutral_when_momentum_is_unknown():
-    s = sub(cs.compute(panels(t2_squeeze=squeeze(short_float=0.34,
-                                                 perf_month=None)), "XYZ"),
-            "squeeze")["score"]
-    assert s == 50.0
+def test_short_interest_still_reaches_the_composite_as_a_divergence():
+    # Excluded from the blend, but not from the output: heavy short float
+    # against negative dealer gamma is still the flag worth reading.
+    p = cs.compute(panels(t2_squeeze=squeeze(short_float=0.30),
+                          t2_positioning=positioning(regime="negative")), "XYZ")
+    assert "squeeze_setup" in keys_of(p)
 
 
 # --------------------------------------------------------------------------- #
@@ -182,9 +182,9 @@ def test_missing_panels_renormalise_rather_than_scoring_fifty():
     without_squeeze = cs.compute(
         panels(t2_news=news(mean=0.5), t2_social=social(blended=0.8),
                t2_squeeze=None), "XYZ")
-    assert sub(without_squeeze, "squeeze")["available"] is False
+    # The Finviz payload now feeds exactly one sub-score, the analyst view.
     assert sub(without_squeeze, "analyst")["available"] is False
-    assert "Short interest" in without_squeeze["missing"]
+    assert "Analyst view" in without_squeeze["missing"]
     # Both bullish reads survive; the composite does not collapse to 50.
     assert without_squeeze["composite"] > 55
     assert full["composite"] > 55

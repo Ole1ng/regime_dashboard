@@ -174,6 +174,9 @@ signal-per-request available.
 - `Recom` is inverted: 1 = Strong Buy … 5 = Strong Sell.
 - `Earnings` carries **no year** (`'Aug 26 AMC'`) — infer the nearest.
 - `-` and `''` mean missing, never zero.
+- Short interest drives the Squeeze & Ownership panel and the squeeze-fuel
+  divergence, but is deliberately **not** a composite sub-score. Of this page,
+  only `Recom` and `Target Price` vote in the blend.
 
 ## 9. Retail sentiment — StockTwits ✅
 
@@ -207,8 +210,11 @@ bare time and must inherit the date above them.
 `https://data.sec.gov/submissions/CIK{cik10}.json`.
 
 **Requires a declared `User-Agent` carrying a contact address** — a browser UA is
-against SEC policy and gets blocked. The ticker map is ~1 MB and changes weekly, so it
-is cached in the `kv` table with a 7-day TTL.
+against SEC policy and gets blocked (403, plus a ~10-minute IP block; the rate cap is
+10 req/s). Supplied via the `SEC_USER_AGENT` environment variable, not hardcoded, so
+each user declares their own traffic — see `.env.example`. Unset, `_filings()` returns
+`available: False` and the panel degrades without touching the network. The ticker map
+is ~1 MB and changes weekly, so it is cached in the `kv` table with a 7-day TTL.
 
 - `filings.recent` holds parallel arrays; NVDA and WEN each return ~1,000 entries.
 - 8-K **item 2.02** is the earnings release — the anchor for post-earnings move history.
