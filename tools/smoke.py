@@ -1,10 +1,19 @@
 """Live smoke test: run each panel's refresh() and print the payload summary.
 
-    python tools/smoke.py [panel ...]
+    python tools/smoke.py [panel ...]        # Tab 1, fixed subject
+    python tools/smoke.py t2 [SYMBOL ...]    # Tab 2, per ticker
 
-Panels: vix, correlation, profile, calendar, gamma, spy, cftc, regime. No
-arguments runs everything. Used to check a panel against real data before
-wiring it into the app.
+Tab 1 panels: vix, correlation, profile, calendar, gamma, spy, cftc, regime.
+No arguments runs all of them.
+
+Tab 2 runs every ticker panel plus the composite for each symbol given
+(default NVDA). Worth running against three shapes before trusting a change:
+
+    python tools/smoke.py t2 NVDA WEN QQQ
+
+NVDA is a deep, dense chain; WEN is a low-priced small cap with a thin chain,
+an extreme short float and an activist filing; QQQ is an ETF, which has no
+issuer filings and exercises that suppression path.
 """
 
 from __future__ import annotations
@@ -14,6 +23,15 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# Commentary warnings are prefixed with "⚠", which a Windows console running
+# the legacy cp1252 codepage cannot encode — printing one raises
+# UnicodeEncodeError and kills the run partway through. Force UTF-8 and fall
+# back to replacement characters rather than losing the output.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, ValueError):  # pragma: no cover - non-standard stdout
+    pass
 
 
 def show(title: str, payload: dict, keys: list[str] | None = None) -> None:
@@ -136,15 +154,119 @@ def run_regime() -> None:
               f"{lv['distance_pct']*100:+6.2f}%  {', '.join(lv['sources'])}")
 
 
+# --------------------------------------------------------------------------- #
+# Tab 2 — ticker sentiment. These take a symbol; everything above is fixed.
+# --------------------------------------------------------------------------- #
+
+def _t2_inputs(symbol: str):
+    """Fetch the three shared inputs once, exactly as the route does."""
+    from panels import _finviz, ticker_positioning as tp
+    chain = quote = prices = None
+    try:
+        chain = tp.fetch_chain(symbol)
+    except Exception as exc:
+        print(f"  (no CBOE chain: {type(exc).__name__}: {exc})")
+    try:
+        quote = _finviz.fetch_quote(symbol)
+    except Exception as exc:
+        print(f"  (no Finviz quote: {type(exc).__name__}: {exc})")
+    try:
+        import yfinance as yf
+        prices = yf.Ticker(symbol).history(period="1y")
+    except Exception as exc:
+        print(f"  (no price history: {type(exc).__name__}: {exc})")
+    return chain, quote, prices
+
+
+def run_t2(symbol: str = "NVDA") -> None:
+    """Run every Tab 2 panel for one symbol and print each payload summary."""
+    from panels import (ticker_events as ev, ticker_news as nw,
+                        ticker_positioning as tp, ticker_sentiment as cs,
+                        ticker_social as so, ticker_squeeze as sq,
+                        vol_sentiment as vs)
+
+    print(f"\n{'#' * 70}\n# TAB 2 — {symbol}\n{'#' * 70}")
+    chain, quote, prices = _t2_inputs(symbol)
+    panels: dict = {}
+
+    if chain:
+        panels["t2_positioning"] = tp.compute(chain, symbol)
+        show(f"{symbol} DEALER POSITIONING", panels["t2_positioning"], [
+            "spot", "regime", "zero_gamma", "cushion_pct", "net_gex", "dex",
+            "gross_dex", "call_wall", "put_wall", "bucket", "display_pct",
+            "n_contracts"])
+
+        panels["t2_vol"] = vs.compute(chain, symbol, prices=prices, history=[])
+        show(f"{symbol} OPTIONS & VOLATILITY", panels["t2_vol"], [
+            "iv30", "atm_iv", "skew_25d", "skew_25d_pct", "skew_state",
+            "pcr_oi", "pcr_vol", "term_slope", "term_state", "rv20",
+            "ivrv_spread", "ivrv_state", "max_pain", "max_pain_dist_pct",
+            "iv_rank", "history_days"])
+
+    if quote:
+        panels["t2_squeeze"] = sq.compute(quote, symbol)
+        show(f"{symbol} SQUEEZE & OWNERSHIP", panels["t2_squeeze"], [
+            "company", "spot", "market_cap", "short_float", "days_to_cover",
+            "squeeze_score", "squeeze_band", "inst_own", "inst_trans",
+            "insider_trans", "recom_label", "target_upside", "rsi",
+            "rel_volume", "from_high", "perf_month"])
+
+        panels["t2_news"] = nw.refresh(
+            symbol, company=quote.get("company"), finviz_news=quote.get("news"))
+        show(f"{symbol} NEWS", panels["t2_news"], [
+            "count", "tone", "mean", "feeds", "themes", "errors"])
+
+    panels["t2_social"] = so.refresh(symbol, history=[])
+    show(f"{symbol} RETAIL CHATTER", panels["t2_social"], [
+        "n", "bullish", "bearish", "untagged", "bull_pct", "untagged_mean",
+        "blended", "tone", "unique_users", "velocity_state", "co_mentions"])
+
+    panels["t2_events"] = ev.refresh(
+        symbol, chain_json=chain, snapshot=panels.get("t2_squeeze"),
+        prices=prices,
+        security_type=((chain or {}).get("data") or {}).get("security_type"))
+    show(f"{symbol} EARNINGS & CATALYSTS", panels["t2_events"], [
+        "earnings_date", "earnings_when", "earnings_days_out", "implied_move",
+        "implied_expiry", "covers_earnings", "move_ratio", "move_state",
+        "historical_moves"])
+
+    composite = cs.compute(panels, symbol)
+    show(f"{symbol} COMPOSITE SENTIMENT", composite, [
+        "composite", "band", "label", "confidence", "missing"])
+    print("\n  sub-scores:")
+    for v in composite["subscores"]:
+        score = f"{v['score']:5.1f}" if v["available"] else "  n/a"
+        print(f"    {v['label']:22} {score}  w {v['weight']:>2} "
+              f"/ eff {v['weight_eff']:<5}  {v['reading']}")
+    print("\n  divergences:")
+    for d in composite["divergences"] or []:
+        print(f"    [{d['severity']:5}] {d['label']}: {d['sentence']}")
+    if not composite["divergences"]:
+        print("    (none)")
+
+
 RUNNERS = {"vix": run_vix, "correlation": run_correlation, "profile": run_profile,
            "calendar": run_calendar, "gamma": run_gamma, "spy": run_spy,
            "cftc": run_cftc, "regime": run_regime}
 
+# Tab 2 runners take a symbol, so they are dispatched separately from the
+# fixed-subject Tab 1 panels above.
+TICKER_RUNNERS = {"t2": run_t2}
+
 if __name__ == "__main__":
-    names = sys.argv[1:] or list(RUNNERS)
+    args = sys.argv[1:]
+    if args and args[0] in TICKER_RUNNERS:
+        # e.g. `python tools/smoke.py t2 WEN NVDA`
+        symbols = args[1:] or ["NVDA"]
+        for sym in symbols:
+            TICKER_RUNNERS[args[0]](sym.upper())
+        sys.exit(0)
+
+    names = args or list(RUNNERS)
     for n in names:
         if n not in RUNNERS:
-            print(f"unknown panel {n!r}; choose from {list(RUNNERS)}")
+            print(f"unknown panel {n!r}; choose from "
+                  f"{list(RUNNERS) + list(TICKER_RUNNERS)}")
             continue
         try:
             RUNNERS[n]()

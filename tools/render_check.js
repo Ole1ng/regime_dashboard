@@ -27,7 +27,10 @@ const api = new Function(
   src + "\n; return { auctionChart, gexChart, spyNetGexChart, charmChart," +
         " vixCurve, corrSpark, cftcSpark, cftcGauge, pctlBar, confluenceTable," +
         " renderProfile, renderRegime, renderGamma, renderSpyPositioning," +
-        " renderCftcPositioning, renderVix, renderCorrelation, renderCalendar };")();
+        " renderCftcPositioning, renderVix, renderCorrelation, renderCalendar," +
+        " scoreGauge, subscoreBars, bullBearBar, historySpark, termCurve," +
+        " divergenceList, renderT2Sentiment, renderT2Positioning, renderT2Vol," +
+        " renderT2Squeeze, renderT2Social, renderT2Events, renderT2News };")();
 
 function fetchState() {
   return new Promise((resolve, reject) => {
@@ -216,6 +219,15 @@ function check(name, html) {
     ["correlation", api.renderCorrelation, P("correlation")],
     ["cftc_positioning", api.renderCftcPositioning, P("cftc_positioning")],
     ["volume_profile", api.renderProfile, P("volume_profile")],
+    // Tab 2 — empty until a ticker has been analysed, so these are skipped
+    // rather than failed when their payload is absent (see the loop below).
+    ["t2_sentiment", api.renderT2Sentiment, P("t2_sentiment")],
+    ["t2_positioning", api.renderT2Positioning, P("t2_positioning")],
+    ["t2_vol", api.renderT2Vol, P("t2_vol")],
+    ["t2_squeeze", api.renderT2Squeeze, P("t2_squeeze")],
+    ["t2_social", api.renderT2Social, P("t2_social")],
+    ["t2_events", api.renderT2Events, P("t2_events")],
+    ["t2_news", api.renderT2News, P("t2_news")],
   ];
   for (const [name, fn, payload] of panels) {
     const b = body();

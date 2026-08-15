@@ -474,3 +474,111 @@ svg.cftc-spark {
 .footer {
   text-align: center; color: var(--fg-dim); font-size: 11px; padding: 0 20px 28px;
 }
+
+/* ------------------------------------------------------------------ */
+/* Tab 2 — ticker sentiment                                            */
+/* ------------------------------------------------------------------ */
+
+/* Control groups are swapped by showTab(), so only the active tab's
+   refresh control occupies the top bar. */
+.tab-controls { display: flex; align-items: center; gap: 8px; }
+.tab-controls[hidden] { display: none; }
+
+.sym-input {
+  width: 96px; padding: 7px 10px;
+  background: var(--bg); color: var(--accent);
+  border: 1px solid var(--border-lt); border-radius: 3px;
+  font-family: var(--mono); font-size: 13px; font-weight: 600;
+  letter-spacing: 1px; text-transform: uppercase;
+}
+.sym-input:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(255, 158, 27, 0.15);
+}
+.sym-input::placeholder { color: var(--fg-dim); letter-spacing: 1px; }
+
+/* Which ticker this panel is showing. The store keeps only the
+   last-analysed name, so every panel labels itself. */
+.t2-sym {
+  display: flex; align-items: baseline; gap: 10px;
+  font-family: var(--mono); font-size: 17px; font-weight: 700;
+  color: var(--accent); letter-spacing: 1.5px; margin-bottom: 10px;
+}
+.t2-sym-sub {
+  font-size: 11px; font-weight: 400; letter-spacing: 0.5px;
+  color: var(--fg-dim);
+}
+
+/* Composite gauge */
+.gauge-band { opacity: 0.85; }
+.gauge-band-1 { fill: #7a1f1a; }
+.gauge-band-2 { fill: #5a2a20; }
+.gauge-band-3 { fill: #4a3a1c; }
+.gauge-band-4 { fill: #23522f; }
+.gauge-band-5 { fill: #1f7a3e; }
+.gauge-tick { fill: var(--fg-dim); font-size: 10px; font-family: var(--mono); }
+.gauge-needle { fill: var(--accent); }
+.gauge-needle-line { stroke: var(--accent); stroke-width: 2; }
+.gauge-num {
+  fill: var(--fg); font-size: 15px; font-weight: 700; font-family: var(--mono);
+}
+
+/* Sub-score breakdown: deviation from the 50 midline. */
+.sub-axis { stroke: var(--border-lt); stroke-width: 1; }
+.sub-label { fill: var(--fg-dim); font-size: 11px; font-family: var(--mono); }
+.sub-na { fill: var(--fg-dim); font-size: 10px; font-style: italic; }
+.sub-bar.pos { fill: var(--up); }
+.sub-bar.neg { fill: var(--down); }
+.sub-val {
+  fill: var(--fg); font-size: 11px; font-family: var(--mono); font-weight: 600;
+}
+.sub-wt { fill: var(--fg-dim); font-size: 9.5px; font-family: var(--mono); }
+
+/* Stacked bullish / neutral / bearish ratio bar. */
+.bb-bull { fill: var(--up-dk); }
+.bb-neu  { fill: #3a2f1c; }
+.bb-bear { fill: #7a1f1a; }
+.bb-lbl  { fill: var(--fg); font-size: 10px; font-family: var(--mono); }
+
+/* Divergences — the panel's actual output, so they are visually loud. */
+.divs { display: flex; flex-direction: column; gap: 6px; }
+.div-flag {
+  padding: 7px 10px; border-left: 3px solid var(--border-lt);
+  background: #12100c; font-size: 12px; line-height: 1.5;
+  color: var(--fg-dim);
+}
+.div-flag strong { color: var(--fg); }
+.div-flag.note  { border-left-color: var(--blue); }
+.div-flag.warn  { border-left-color: var(--amber); }
+.div-flag.alert { border-left-color: var(--down); background: #1a100e; }
+.div-tag {
+  display: inline-block; margin-right: 8px; padding: 1px 6px;
+  border-radius: 2px; font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: 0.8px; background: #241b10; color: var(--fg-dim);
+}
+.div-flag.note  .div-tag { color: var(--blue); }
+.div-flag.warn  .div-tag { color: var(--amber); }
+.div-flag.alert .div-tag { color: var(--down); }
+
+/* Term-structure curve: the base .curve-line only defines colour via
+   state modifiers, so give this chart its own default. */
+.chart.curve .curve-line { stroke: var(--accent); }
+.chart.curve .curve-dot  { stroke: var(--accent); }
+.curve-axis { stroke: var(--border-lt); stroke-width: 1; }
+
+table.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.news-src { color: var(--fg-dim); font-size: 11px; }
+
+/* SEC filing kinds, coloured by what the filing means rather than its
+   form number. */
+.chip.filing-earnings  { border-color: #234a5a; color: var(--blue); }
+.chip.filing-insider   { border-color: #5a4420; color: var(--amber); }
+.chip.filing-activist  { border-color: #5a2222; color: var(--down); }
+.chip.filing-ownership { border-color: var(--border-lt); color: var(--fg-dim); }
+.chip.filing-offering,
+.chip.filing-shelf     { border-color: #5a2222; color: var(--down); }
+.chip.filing-periodic,
+.chip.filing-proxy,
+.chip.filing-comp,
+.chip.filing-event,
+.chip.filing-other     { border-color: var(--border-lt); color: var(--fg-dim); }

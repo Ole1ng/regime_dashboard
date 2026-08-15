@@ -1,12 +1,18 @@
 # Regime Dashboard
 
-A local, offline-first dashboard that combines dealer gamma positioning, delta
-decay, VIX term structure, auction structure, implied correlation and the
-expiration calendar into a single conditional-distribution read on SPX.
+A local, offline-first dashboard in two parts:
 
-Tab 1 (**SPX REGIME**) is built. Tabs 2 and 3 are reserved placeholders.
+- **Tab 1 — SPX REGIME** combines dealer gamma positioning, delta decay, VIX
+  term structure, auction structure, implied correlation and the expiration
+  calendar into a single conditional-distribution read on SPX.
+- **Tab 2 — TICKER SENTIMENT** answers the same kind of question for one US
+  equity: type a ticker, and get dealer positioning, options-derived fear
+  gauges, short interest and ownership, news and retail sentiment, event risk,
+  and the divergences between them.
 
-The domain spec is [`RESEARCH.md`](RESEARCH.md) — every panel implements a
+Tab 3 remains a reserved placeholder.
+
+The domain spec is [`RESEARCH.md`](RESEARCH.md) — every Tab 1 panel implements a
 section of it. The verified data sources are in
 [`DATA_SOURCES.md`](DATA_SOURCES.md).
 
@@ -21,9 +27,10 @@ python app.py
 
 Then open <http://localhost:8020>.
 
-Nothing auto-refreshes. Press **Refresh** to pull fresh data (~15 s — the SPX
-chain alone is 13 MB). Everything is persisted to SQLite, so reopening the page
-renders the last session immediately.
+Nothing auto-refreshes. On Tab 1, press **Refresh** to pull fresh data (~15 s —
+the SPX chain alone is 13 MB). On Tab 2, type a ticker and press **Analyse**
+(~10 s across five sources). Everything is persisted to SQLite, so reopening the
+page renders the last session immediately.
 
 All data sources are free and unauthenticated. There is no API key, no account,
 and no LLM anywhere in the pipeline — every piece of analysis is deterministic
@@ -97,6 +104,60 @@ nobody agreed on value there, so it is *weakened*, not confirmed.
 
 ---
 
+## Tab 2 — Ticker Sentiment
+
+One ticker input, one **Analyse** button, seven panels. Three network fetches
+feed all of them: the CBOE chain (positioning, volatility, implied move), one
+Finviz quote page (short interest, ownership, analyst, earnings date, and 100
+news rows), and one yfinance history (realised vol, post-earnings moves).
+
+| Panel | Question it answers |
+|---|---|
+| **Composite Sentiment** | Where do six independent reads land, how much do they agree, and **where do they conflict** |
+| **Dealer Positioning** | The Tab 1 gamma engine pointed at a single name — walls, flip level, OI gravity |
+| **Options & Volatility** | 25Δ skew, put/call on book and flow, term structure, IV vs realised, max pain |
+| **Squeeze & Ownership** | Short float and days to cover, institutional and insider holdings *and changes*, analyst consensus vs price |
+| **Retail Chatter** | StockTwits declared positions, WSB-lexicon scoring of the rest, mention velocity |
+| **Earnings & Catalysts** | Days to the print, the straddle's implied move vs the name's own history, and classified SEC filings |
+| **News & Sentiment** | Google News + Seeking Alpha + Finviz, deduplicated, VADER with a finance lexicon, tone split by publisher |
+
+### The point is divergence, not the score
+
+The composite is navigation; the sub-score breakdown and the conflicts between
+panels are the output. Encoded divergences include retail bullish into a
+downtrend, retail long while the options market pays up for downside, insiders
+selling into enthusiasm, price above the consensus target, squeeze fuel with
+dealers short gamma, and a live offering registered into retail enthusiasm.
+
+### Three things that are deliberately *not* directional
+
+Each is a category error that is easy to introduce and hard to notice, so each
+has a regression test that fails if someone "simplifies" it later.
+
+- **Dealer gamma maps to volatility, not direction.** Positive gamma damps
+  moves; negative amplifies them. Neither is bullish. Direction comes from spot
+  versus the flip level, wall structure, and open-interest gravity; the gamma
+  regime only sets an amplification flag and docks confidence.
+
+- **Net DEX is not a signal at all.** Under this project's sign convention
+  (dealers long calls, short puts) a call contributes `+delta·OI` and a put
+  contributes `−delta·OI` with delta already negative — so every contract
+  contributes a *positive* amount and net DEX is identically equal to gross DEX.
+  Measured at exactly `+1.000000` for WEN, NVDA and TSLA. It measures the size
+  of the hedging requirement, never its direction.
+
+- **Short interest is fuel, not a direction.** A heavily shorted name that is
+  rising has squeeze potential; the identical short interest on a falling name
+  means the shorts are winning. The sub-score is signed by realised momentum.
+
+### Trend metrics need history
+
+`ticker_history` stores one flat snapshot per ticker per day. IV rank and social
+mention velocity are meaningless as a point reading, so they report
+`n/60` and `n/5` sessions stored rather than a fabricated percentile.
+
+---
+
 ## Notable implementation details
 
 Several things here deviate from the obvious implementation because running
@@ -149,6 +210,35 @@ regression test.
   `gamma_engine.SPY` still exists: the tests use it to check that the SPX
   thresholds are scale-separated from SPY's.
 
+- **Finviz packs two values into one cell with no delimiter.** `52W Low` renders
+  as `'164.0737.23%'` — price then distance, with nothing between them, and the
+  percentage unsigned. Parsing with `get_text(separator="\x1f")` puts a unit
+  separator between the sibling `<span>`s and makes it `'164.07\x1f37.23%'`.
+  The snapshot is also split across **six** `snapshot-table2` elements;
+  `select_one` returns 14 pairs instead of 83 and drops every short-interest and
+  ownership field *without raising*.
+
+- **Tab 2 never shows another ticker's cached numbers.** Tab 1's `_run` keeps a
+  stale payload visible behind an error badge, which is right when the subject
+  never changes. Tab 2's subject changes every press, so `_run_t2` only
+  preserves the cache when its `symbol` matches the ticker being requested —
+  otherwise a failed Finviz fetch would render NVDA's short interest under a WEN
+  header.
+
+- **The strike-chart window widens for low-priced names.** A fixed ±6% around
+  an $8.61 stock with $1.00 strikes captures two strikes. The window steps out
+  through 6/10/15/25% until at least 8 strikes are in frame; dense chains are
+  unaffected and stay at ±6%.
+
+- **A 424B is not a Form 4, and a shelf is not an offering.** Prefix-matching
+  `"4"` classifies `424B5` as an insider filing. And an S-3ASR automatic shelf
+  is routine plumbing for a large issuer — flagging it as dilution labels every
+  mega-cap a financing risk, so the warning is gated on market cap.
+
+- **Post-earnings history is computed over every filing, not the display
+  slice.** An active filer's most recent twenty EDGAR rows are all Form 4s; WEN
+  had 35 earnings 8-Ks in its full submission list and none in the first twenty.
+
 ---
 
 ## Layout
@@ -166,6 +256,16 @@ panels/
   volume_profile.py     SPY auction structure, naked POCs, LVN corridors
   calendar_context.py   OPEX / VIX expiry / ex-div / quarter-end rules
   regime.py             Regime classifier + confluence scorer (pure)
+  --- Tab 2 ---
+  _finviz.py            Finviz quote scrape + all snapshot parse helpers
+  _sentiment_util.py    VADER with finance/WSB lexicons, themes, salience
+  ticker_positioning.py Dealer positioning for any optionable ticker
+  vol_sentiment.py      Skew, put/call, term structure, IV-RV, max pain
+  ticker_squeeze.py     Short interest, ownership, analyst, trend
+  ticker_social.py      StockTwits tags + inferred scoring, velocity
+  ticker_news.py        Google News + Seeking Alpha + Finviz, deduped
+  ticker_events.py      Earnings, implied move, classified SEC filings
+  ticker_sentiment.py   Composite score + divergence rules (pure)
   test_*.py             One test module per panel
 static/                 index.html, app.js, style.css (no frameworks, no CDN)
 tools/
@@ -180,12 +280,24 @@ tools/
 ## Tests
 
 ```bash
-python -m pytest panels/ -q          # 196 tests, no network
-python tools/check_contract.py       # frontend field contract (server running)
-node tools/render_check.js           # renderer output + chart geometry
-python tools/calibrate.py            # live magnitudes vs thresholds
-python tools/smoke.py [panel ...]    # one panel's refresh() against live data
+python -m pytest panels/ -q                     # 316 tests, no network
+python tools/check_contract.py                  # Tab 1 field contract
+python tools/check_contract.py --panels tab2    # Tab 2, after an Analyse
+python tools/check_contract.py --panels all
+node tools/render_check.js                      # renderer output + geometry
+python tools/calibrate.py                       # live magnitudes vs thresholds
+python tools/smoke.py [panel ...]               # Tab 1 panels against live data
+python tools/smoke.py t2 NVDA WEN QQQ           # Tab 2 across three shapes
 ```
+
+The three smoke symbols are chosen to exercise different shapes: NVDA is a deep,
+dense chain; WEN is a low-priced small cap with a thin chain, a 34% short float
+and an activist 13D; QQQ is an ETF, which has no issuer filings and no short
+interest, so it exercises the weight-renormalisation path.
+
+Tab 2's contract check is opt-in because its panels hold no payload until a
+ticker has been analysed — requiring them by default would fail the Tab 1 check
+on a fresh database.
 
 `render_check.js` runs the real renderers against live payloads under a stubbed
 DOM and checks for NaN coordinates, `undefined` in labels, unbalanced SVG tags,

@@ -10,6 +10,14 @@ const RENDERERS = {
   correlation: renderCorrelation,
   cftc_positioning: renderCftcPositioning,
   volume_profile: renderProfile,
+  // Tab 2 — ticker sentiment
+  t2_sentiment: renderT2Sentiment,
+  t2_positioning: renderT2Positioning,
+  t2_vol: renderT2Vol,
+  t2_squeeze: renderT2Squeeze,
+  t2_social: renderT2Social,
+  t2_events: renderT2Events,
+  t2_news: renderT2News,
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1077,6 +1085,467 @@ function renderCalendar(body, p) {
 // Tabs + refresh wiring
 // --------------------------------------------------------------------------
 
+// --------------------------------------------------------------------------
+// Tab 2 — ticker sentiment
+// --------------------------------------------------------------------------
+
+// Every Tab 2 panel shares three non-data states: nothing analysed yet, the
+// ticker does not exist, and this source failed for the ticker on screen. The
+// last matters most — it means "we have no data for THIS symbol", never another
+// symbol's stale numbers under the wrong header.
+function t2Guard(body, p, what) {
+  if (!p) {
+    body.innerHTML = `<p class="empty-note">Enter a ticker and press ` +
+      `<strong>Analyse</strong>.</p>`;
+    return true;
+  }
+  if (p.not_found) {
+    body.innerHTML = `<p class="empty-note">${esc(p.message ||
+      `Nothing found for ${p.symbol || "this ticker"}.`)}</p>`;
+    return true;
+  }
+  if (p.unavailable) {
+    body.innerHTML = `<p class="empty-note">${esc(what)} unavailable for ` +
+      `<strong>${esc(p.symbol || "")}</strong>. ${esc(p.message || "")}</p>`;
+    return true;
+  }
+  return false;
+}
+
+// Symbol chip so each panel says which ticker it is showing — the store holds
+// only the last-analysed name, and a stale tab is otherwise unlabelled.
+function t2Sym(p, extra) {
+  return `<div class="t2-sym">${esc(p.symbol || "")}` +
+    (extra ? `<span class="t2-sym-sub">${esc(extra)}</span>` : "") + `</div>`;
+}
+
+// 0-100 banded track with a needle. A horizontal bar rather than an arc: no
+// trig, no edge cases at the extremes, and it stacks cleanly above the
+// sub-score rows that decompose it.
+function scoreGauge(score, label) {
+  if (score == null) return `<p class="empty-note">No composite reading.</p>`;
+  const W = 1000, H = 76, x0 = 20, x1 = W - 20, trackY = 30, trackH = 18;
+  const span = x1 - x0;
+  const at = (v) => x0 + (Math.max(0, Math.min(100, v)) / 100) * span;
+
+  const bands = [[0, 20, 1], [20, 40, 2], [40, 60, 3], [60, 80, 4], [80, 100, 5]];
+  let svg = `<svg class="chart gauge" viewBox="0 0 ${W} ${H}" role="img" ` +
+    `aria-label="Composite sentiment ${score.toFixed(0)} of 100, ${esc(label)}">`;
+  bands.forEach(([lo, hi, n]) => {
+    svg += `<rect class="gauge-band gauge-band-${n}" x="${at(lo)}" y="${trackY}" ` +
+      `width="${at(hi) - at(lo)}" height="${trackH}"/>`;
+  });
+  [0, 20, 40, 60, 80, 100].forEach((v) => {
+    svg += `<text class="gauge-tick" x="${at(v)}" y="${trackY + trackH + 14}" ` +
+      `text-anchor="middle">${v}</text>`;
+  });
+  const nx = at(score);
+  svg += `<polygon class="gauge-needle" points="${nx - 7},${trackY - 4} ` +
+    `${nx + 7},${trackY - 4} ${nx},${trackY + 6}"/>`;
+  svg += `<line class="gauge-needle-line" x1="${nx}" y1="${trackY}" x2="${nx}" ` +
+    `y2="${trackY + trackH}"/>`;
+  svg += `<text class="gauge-num" x="${nx}" y="${trackY - 10}" ` +
+    `text-anchor="middle">${score.toFixed(0)}</text>`;
+  return svg + `</svg>`;
+}
+
+// One row per sub-score, drawn as a deviation from the 50 midline so the
+// direction and size of each contribution are readable at a glance. The whole
+// point of the panel is that the breakdown outranks the headline number.
+function subscoreBars(rows) {
+  if (!rows || !rows.length) return "";
+  const W = 1000, rowH = 26, padTop = 8;
+  const H = padTop * 2 + rows.length * rowH;
+  const labelW = 210, x0 = labelW, x1 = W - 120;
+  const mid = (x0 + x1) / 2, half = (x1 - x0) / 2;
+
+  let svg = `<svg class="chart subscores" viewBox="0 0 ${W} ${H}" role="img" ` +
+    `aria-label="Sentiment sub-scores, 50 is neutral">`;
+  svg += `<line class="sub-axis" x1="${mid}" y1="${padTop}" x2="${mid}" ` +
+    `y2="${H - padTop}"/>`;
+
+  rows.forEach((r, i) => {
+    const y = padTop + i * rowH + rowH / 2;
+    svg += `<text class="sub-label" x="0" y="${y + 4}">${esc(r.label)}</text>`;
+    if (!r.available) {
+      svg += `<text class="sub-na" x="${mid}" y="${y + 4}" text-anchor="middle">` +
+        `not available</text>`;
+      return;
+    }
+    const dev = (r.score - 50) / 50;
+    const w = Math.abs(dev) * half;
+    const pos = dev >= 0;
+    const x = pos ? mid : mid - w;
+    svg += `<rect class="sub-bar ${pos ? "pos" : "neg"}" x="${x}" ` +
+      `y="${y - 7}" width="${Math.max(w, 0.5)}" height="14">` +
+      `<title>${esc(r.label)}: ${r.score.toFixed(0)}/100 — ${esc(r.reading || "")}` +
+      ` (weight ${r.weight_eff})</title></rect>`;
+    svg += `<text class="sub-val" x="${W - 110}" y="${y + 4}">` +
+      `${r.score.toFixed(0)}</text>`;
+    svg += `<text class="sub-wt" x="${W - 60}" y="${y + 4}">w ${r.weight_eff}</text>`;
+  });
+  return svg + `</svg>`;
+}
+
+// Stacked 100% bar. Used for declared StockTwits positions and for news tone,
+// which share the bullish / bearish / neutral shape.
+function bullBearBar(bull, bear, neutral, labels) {
+  const total = (bull || 0) + (bear || 0) + (neutral || 0);
+  if (!total) return "";
+  const W = 1000, H = 34, y = 4, h = 20;
+  const seg = (n) => (n / total) * W;
+  const wb = seg(bull), wr = seg(bear), wn = seg(neutral);
+  const l = labels || ["bullish", "bearish", "neutral"];
+
+  let svg = `<svg class="chart bbbar" viewBox="0 0 ${W} ${H}" role="img" ` +
+    `aria-label="${bull} ${l[0]}, ${bear} ${l[1]}, ${neutral} ${l[2]}">`;
+  let x = 0;
+  [["bb-bull", wb, bull, l[0]], ["bb-neu", wn, neutral, l[2]],
+   ["bb-bear", wr, bear, l[1]]].forEach(([cl, w, n, lbl]) => {
+    if (w > 0) {
+      svg += `<rect class="${cl}" x="${x}" y="${y}" width="${w}" height="${h}">` +
+        `<title>${n} ${esc(lbl)} (${((n / total) * 100).toFixed(0)}%)</title></rect>`;
+      if (w > 60)
+        svg += `<text class="bb-lbl" x="${x + w / 2}" y="${y + 14}" ` +
+          `text-anchor="middle">${((n / total) * 100).toFixed(0)}%</text>`;
+      x += w;
+    }
+  });
+  return svg + `</svg>`;
+}
+
+// Generic sparkline over the stored daily history. Returns a "building
+// history" note rather than a misleading one-point line.
+function historySpark(rows, field, opts) {
+  const o = opts || {};
+  const pts = (rows || []).filter((r) => r[field] != null);
+  if (pts.length < 2) {
+    return `<p class="footnote">${esc(o.label || field)}: building history — ` +
+      `${pts.length} session${pts.length === 1 ? "" : "s"} stored.</p>`;
+  }
+  const W = 1000, H = 90, pad = 8;
+  const vals = pts.map((r) => Number(r[field]));
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const span = hi - lo || 1;
+  const xOf = (i) => pad + (i / (pts.length - 1)) * (W - 2 * pad);
+  const yOf = (v) => H - pad - ((v - lo) / span) * (H - 2 * pad);
+
+  const d = vals.map((v, i) => `${i ? "L" : "M"}${xOf(i).toFixed(1)},` +
+    `${yOf(v).toFixed(1)}`).join(" ");
+  const fmt = o.fmt || ((v) => v.toFixed(1));
+  let svg = `<svg class="chart spark" viewBox="0 0 ${W} ${H}" role="img" ` +
+    `aria-label="${esc(o.label || field)} over ${pts.length} sessions">`;
+  svg += `<path class="spark-line" d="${d}"/>`;
+  svg += `<circle class="spark-now" cx="${xOf(pts.length - 1)}" ` +
+    `cy="${yOf(vals[vals.length - 1])}" r="3.5"/>`;
+  svg += `<text class="gauge-tick" x="${pad}" y="12">${esc(o.label || field)} ` +
+    `${fmt(lo)}–${fmt(hi)} over ${pts.length} sessions</text>`;
+  return svg + `</svg>`;
+}
+
+// ATM implied vol by expiry. Inversion (front above back) is the shape that
+// matters, so the axis is left deliberately un-zeroed to make slope visible.
+function termCurve(term) {
+  const pts = (term || []).filter((t) => t.atm_iv != null);
+  if (pts.length < 2) return "";
+  const W = 1000, H = 150, padL = 46, padR = 16, padT = 14, padB = 26;
+  const dtes = pts.map((t) => t.dte), ivs = pts.map((t) => t.atm_iv);
+  const dLo = Math.min(...dtes), dHi = Math.max(...dtes);
+  const vLo = Math.min(...ivs), vHi = Math.max(...ivs);
+  const dSpan = dHi - dLo || 1, vSpan = (vHi - vLo) || 0.01;
+  const xOf = (d) => padL + ((d - dLo) / dSpan) * (W - padL - padR);
+  const yOf = (v) => H - padB - ((v - vLo) / vSpan) * (H - padT - padB);
+
+  let svg = `<svg class="chart curve" viewBox="0 0 ${W} ${H}" role="img" ` +
+    `aria-label="At-the-money implied volatility by days to expiry">`;
+  svg += `<line class="curve-axis" x1="${padL}" y1="${H - padB}" x2="${W - padR}" ` +
+    `y2="${H - padB}"/>`;
+  const d = pts.map((t, i) => `${i ? "L" : "M"}${xOf(t.dte).toFixed(1)},` +
+    `${yOf(t.atm_iv).toFixed(1)}`).join(" ");
+  svg += `<path class="curve-line" d="${d}"/>`;
+  pts.forEach((t) => {
+    svg += `<circle class="curve-dot" cx="${xOf(t.dte)}" cy="${yOf(t.atm_iv)}" r="3">` +
+      `<title>${esc(t.expiry)} (${t.dte}d): ${(t.atm_iv * 100).toFixed(1)}% ` +
+      `ATM IV, ${t.n} contracts</title></circle>`;
+  });
+  svg += `<text class="gauge-tick" x="4" y="${yOf(vHi) + 4}">` +
+    `${(vHi * 100).toFixed(0)}%</text>`;
+  svg += `<text class="gauge-tick" x="4" y="${yOf(vLo) + 4}">` +
+    `${(vLo * 100).toFixed(0)}%</text>`;
+  svg += `<text class="gauge-tick" x="${padL}" y="${H - 6}">${dLo}d</text>`;
+  svg += `<text class="gauge-tick" x="${W - padR}" y="${H - 6}" ` +
+    `text-anchor="end">${dHi}d</text>`;
+  return svg + `</svg>`;
+}
+
+function divergenceList(rows) {
+  if (!rows || !rows.length) {
+    return `<p class="footnote">No cross-panel divergences detected — the ` +
+      `inputs are telling a consistent story.</p>`;
+  }
+  return `<div class="row divs">` + rows.map((d) =>
+    `<div class="div-flag ${esc(d.severity)}">` +
+    `<span class="div-tag">${esc(d.severity)}</span>` +
+    `<strong>${esc(d.label)}</strong> — ${esc(d.sentence)}</div>`).join("") +
+    `</div>`;
+}
+
+function renderT2Sentiment(body, p) {
+  if (t2Guard(body, p, "Composite sentiment")) return;
+  if (p.composite == null) {
+    body.innerHTML = t2Sym(p) + commentaryBlock(p.commentary);
+    return;
+  }
+  const conf = p.confidence == null ? "—" : `${p.confidence.toFixed(0)}%`;
+  const bulls = p.subscores.filter((s) => s.available && s.score >= 60).length;
+  const bears = p.subscores.filter((s) => s.available && s.score <= 40).length;
+
+  const cards = `<div class="row cards cards-4">` +
+    card("Composite", p.composite.toFixed(0), p.label,
+         p.composite >= 60 ? "pos" : p.composite <= 40 ? "neg" : "") +
+    card("Confidence", conf, "agreement between inputs",
+         (p.confidence || 0) < 45 ? "warn" : "") +
+    card("Inputs", `${p.subscores.filter((s) => s.available).length}/` +
+         `${p.subscores.length}`, p.missing.length ? `missing: ${p.missing.length}` : "all available") +
+    card("Split", `${bulls} / ${bears}`, "bullish / bearish inputs") +
+    `</div>`;
+
+  body.innerHTML = t2Sym(p, p.label) + commentaryBlock(p.commentary) + cards +
+    `<div class="row">${scoreGauge(p.composite, p.label)}</div>` +
+    `<div class="row">${subscoreBars(p.subscores)}</div>` +
+    divergenceList(p.divergences) +
+    `<div class="row">${historySpark(p.history, "composite",
+      { label: "Composite", fmt: (v) => v.toFixed(0) })}</div>` +
+    `<div class="footnote">${esc(p.caveat || "")}</div>`;
+}
+
+function renderT2Positioning(body, p) {
+  if (t2Guard(body, p, "Dealer positioning")) return;
+  if (p.spot == null) {
+    body.innerHTML = `<p class="empty-note">No usable option chain.</p>`;
+    return;
+  }
+  // The payload is shape-identical to gamma_spy, so the existing renderer and
+  // its SVG are reused wholesale rather than duplicated. Prepending via the
+  // innerHTML string rather than insertAdjacentHTML keeps this renderer usable
+  // under the stubbed DOM in tools/render_check.js.
+  renderSpyPositioning(body, p);
+  body.innerHTML = t2Sym(p, `spot ${px(p.spot)}`) + body.innerHTML;
+}
+
+function renderT2Vol(body, p) {
+  if (t2Guard(body, p, "Options data")) return;
+
+  const skewSub = p.skew_25d_pct == null ? "—"
+    : `${pct(p.skew_25d_pct, 0)} of ATM · ${p.skew_state}`;
+  const cards = `<div class="row cards cards-4">` +
+    card("IV30", p.iv30 == null ? "—" : pct(p.iv30, 1),
+         p.ivrv_state === "unknown" ? "implied 30-day" : `${p.ivrv_state} vs realised`,
+         p.ivrv_state === "rich" ? "warn" : "") +
+    card("25Δ skew", p.skew_25d == null ? "—"
+         : `${(p.skew_25d * 100).toFixed(1)}pts`, skewSub,
+         p.skew_state === "put-bid" ? "neg" : p.skew_state === "call-bid" ? "pos" : "") +
+    card("P/C ratio", p.pcr_oi == null ? "—" : p.pcr_oi.toFixed(2),
+         `OI · ${p.pcr_vol == null ? "—" : p.pcr_vol.toFixed(2)} volume`,
+         p.pcr_oi_state === "put-heavy" ? "neg" : p.pcr_oi_state === "call-heavy" ? "pos" : "") +
+    card("Term", p.term_slope == null ? "—"
+         : `${(p.term_slope * 100).toFixed(1)}pts`, p.term_state,
+         p.term_state === "inverted" ? "warn" : "") +
+    `</div>`;
+
+  const rvSub = p.rv_pctl_1y == null ? "20-day annualised"
+    : `${p.rv_pctl_1y.toFixed(0)}th pctile of the past year`;
+  const cards2 = `<div class="row cards cards-3">` +
+    card("Realised vol", p.rv20 == null ? "—" : pct(p.rv20, 1), rvSub) +
+    card("IV − RV", p.ivrv_spread == null ? "—"
+         : `${(p.ivrv_spread * 100).toFixed(1)}pts`,
+         p.ivrv_spread == null ? "—" : (p.ivrv_spread > 0
+           ? "options above realised" : "options below realised"),
+         cls(p.ivrv_spread == null ? null : -p.ivrv_spread)) +
+    card("Max pain", p.max_pain == null ? "—" : px(p.max_pain),
+         p.max_pain_dist_pct == null ? "—"
+           : `${signed(p.max_pain_dist_pct)} vs spot · ${p.max_pain_expiry || ""}`) +
+    `</div>`;
+
+  const ivrank = p.iv_rank == null
+    ? `<p class="footnote">IV rank needs ${p.history_needed || 60} daily ` +
+      `snapshots; ${p.history_days || 0} stored so far.</p>`
+    : `<p class="footnote">IV rank ${p.iv_rank.toFixed(0)} · ` +
+      `${p.iv_pctl.toFixed(0)}th percentile over ${p.history_days} sessions.</p>`;
+
+  body.innerHTML = t2Sym(p) + commentaryBlock(p.commentary) + cards +
+    (termCurve(p.term) ? `<div class="row">${termCurve(p.term)}</div>` : "") +
+    cards2 + ivrank +
+    `<div class="footnote">CBOE delayed snapshot · ` +
+    `${(p.n_contracts || 0).toLocaleString()} contracts · ` +
+    `skew quoted on the ${esc(p.skew_expiry || "—")} expiry.</div>`;
+}
+
+function renderT2Squeeze(body, p) {
+  if (t2Guard(body, p, "Short interest and ownership")) return;
+
+  const cards = `<div class="row cards cards-2">` +
+    card("Short float", p.short_float == null ? "—" : pct(p.short_float, 1),
+         `${p.days_to_cover == null ? "—" : p.days_to_cover.toFixed(1)} days to cover`,
+         p.squeeze_band === "extreme" || p.squeeze_band === "high" ? "warn" : "") +
+    card("Squeeze score", p.squeeze_score == null ? "—"
+         : p.squeeze_score.toFixed(0), `${p.squeeze_band} · potential, not direction`) +
+    `</div>`;
+
+  const cards2 = `<div class="row cards cards-2">` +
+    card("Analyst", p.recom_label || "—",
+         p.target_upside == null ? "—"
+           : `target ${px(p.target_price)} (${signed(p.target_upside)})`,
+         cls(p.target_upside)) +
+    card("Insider trans", p.insider_trans == null ? "—" : signed(p.insider_trans),
+         p.inst_own == null ? "—" : `${pct(p.inst_own, 0)} held by institutions`,
+         cls(p.insider_trans)) +
+    `</div>`;
+
+  const rows = [
+    ["RSI (14)", p.rsi == null ? "—" : p.rsi.toFixed(1)],
+    ["Rel volume", p.rel_volume == null ? "—" : `${p.rel_volume.toFixed(2)}x`],
+    ["vs 20-day MA", signed(p.sma20)],
+    ["vs 50-day MA", signed(p.sma50)],
+    ["vs 200-day MA", signed(p.sma200)],
+    ["From 52w high", signed(p.from_high)],
+    ["Perf month", signed(p.perf_month)],
+    ["Market cap", usd(p.market_cap)],
+  ];
+  const tbl = `<div class="tbl-wrap"><table class="data"><tbody>` +
+    rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v}</td></tr>`)
+      .join("") + `</tbody></table></div>`;
+
+  body.innerHTML = t2Sym(p, p.company || "") + commentaryBlock(p.commentary) +
+    cards + cards2 + `<div class="row">${tbl}</div>` +
+    `<div class="footnote">Finviz snapshot · short interest is settlement-date ` +
+    `data and lags by up to two weeks.</div>`;
+}
+
+function renderT2Social(body, p) {
+  if (t2Guard(body, p, "Retail chatter")) return;
+  if (p.empty) {
+    body.innerHTML = t2Sym(p) + commentaryBlock(p.commentary);
+    return;
+  }
+  const velSub = p.velocity_ratio == null
+    ? `needs ${p.velocity_needed} sessions (${p.velocity_days} stored)`
+    : `${p.velocity_ratio.toFixed(1)}x median · ${p.velocity_state}`;
+
+  const cards = `<div class="row cards cards-3">` +
+    card("Bull ratio", p.bull_pct == null ? "—" : pct(p.bull_pct, 0),
+         `${p.tagged} declared positions`, p.bull_pct >= 0.75 ? "warn" : cls(
+           p.bull_pct == null ? null : p.bull_pct - 0.5)) +
+    card("Messages", String(p.n), `${p.unique_users} accounts`, p.thin ? "warn" : "") +
+    card("Velocity", p.velocity_ratio == null ? "—"
+         : `${p.velocity_ratio.toFixed(1)}x`, velSub,
+         p.velocity_state === "spike" ? "warn" : "") +
+    `</div>`;
+
+  const bar = bullBearBar(p.bullish, p.bearish, p.untagged,
+                          ["tagged bullish", "tagged bearish", "untagged"]);
+
+  const terms = (p.top_terms || []).slice(0, 10).map((t) =>
+    `<span class="chip">${esc(t.term)} ${t.count}</span>`).join("");
+  const co = (p.co_mentions || []).map((c) =>
+    `<span class="chip info">${esc(c.symbol)} ${c.count}</span>`).join("");
+
+  const top = (p.top || []).slice(0, 5).map((m) =>
+    `<tr><td class="${m.score >= 0 ? "pos" : "neg"}">` +
+    `${m.sentiment ? esc(m.sentiment) : m.score.toFixed(2)}</td>` +
+    `<td>${esc(m.body)}</td></tr>`).join("");
+
+  body.innerHTML = t2Sym(p, p.tone) + commentaryBlock(p.commentary) + cards +
+    (bar ? `<div class="row">${bar}</div>` : "") +
+    (terms ? `<div class="row chips">${terms}</div>` : "") +
+    (co ? `<div class="row chips">${co}</div>` : "") +
+    (top ? `<div class="row tbl-wrap"><table class="data"><thead><tr>` +
+      `<th>Tag</th><th>Message</th></tr></thead><tbody>${top}</tbody></table></div>` : "") +
+    `<div class="footnote">StockTwits declared tags weighted above inferred ` +
+    `scores; untagged messages read with VADER plus a WSB slang lexicon.</div>`;
+}
+
+function renderT2Events(body, p) {
+  if (t2Guard(body, p, "Catalyst data")) return;
+
+  const hist = p.historical_moves || {};
+  const cards = `<div class="row cards cards-2">` +
+    card("Earnings", p.earnings_date || "—",
+         p.earnings_days_out == null ? "—"
+           : (p.earnings_days_out >= 0
+             ? `in ${p.earnings_days_out}d${p.earnings_when ? ` · ${p.earnings_when}` : ""}`
+             : `${Math.abs(p.earnings_days_out)}d ago`),
+         p.earnings_soon ? "warn" : "") +
+    card("Implied move", p.implied_move == null ? "—" : pct(p.implied_move, 1),
+         hist.mean_abs == null ? (p.implied_expiry || "—")
+           : `vs ${pct(hist.mean_abs, 1)} historical · ${p.move_state}`,
+         p.move_state === "rich" ? "warn" : "") +
+    `</div>`;
+
+  const moves = (hist.moves || []).map((m) =>
+    `<span class="chip ${m.move >= 0 ? "pos" : "neg"}">${esc(m.date)} ` +
+    `${signed(m.move, 1)}</span>`).join("");
+
+  const f = p.filings || {};
+  const filings = (f.recent || []).slice(0, 10).map((r) =>
+    `<tr><td>${esc(r.date)}</td>` +
+    `<td><span class="chip filing-${esc(r.kind)}">${esc(r.form)}</span></td>` +
+    `<td>${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">` +
+      `${esc(r.kind)}</a>` : esc(r.kind)}</td></tr>`).join("");
+
+  const filingsBlock = f.available
+    ? `<div class="row tbl-wrap"><table class="data"><thead><tr>` +
+      `<th>Filed</th><th>Form</th><th>Type</th></tr></thead>` +
+      `<tbody>${filings}</tbody></table></div>` +
+      `<div class="footnote">${f.total_scanned || 0} filings scanned for ` +
+      `${esc(f.company || p.symbol)}${f.sic ? ` · ${esc(f.sic)}` : ""}.</div>`
+    : `<p class="footnote">SEC filings unavailable: ${esc(f.reason || "unknown")}.</p>`;
+
+  body.innerHTML = t2Sym(p) + commentaryBlock(p.commentary) + cards +
+    (moves ? `<div class="row chips">${moves}</div>` : "") +
+    filingsBlock;
+}
+
+function renderT2News(body, p) {
+  if (t2Guard(body, p, "News")) return;
+  if (p.empty) {
+    body.innerHTML = t2Sym(p) + commentaryBlock(p.commentary);
+    return;
+  }
+  const s = p.sentiment || {};
+  const cards = `<div class="row cards cards-3">` +
+    card("Tone", s.tone || "—", `mean ${(s.mean || 0).toFixed(3)}`,
+         s.tone === "Bullish" ? "pos" : s.tone === "Bearish" ? "neg" : "") +
+    card("Headlines", String(p.count),
+         (p.feeds || []).map((f) => `${f.feed} ${f.n}`).join(" · ")) +
+    card("Split", `${s.pos_pct}/${s.neg_pct}`, "% positive / negative") +
+    `</div>`;
+
+  const bar = bullBearBar(s.pos, s.neg, s.neu);
+  const themes = (p.themes || []).slice(0, 12).map((t) =>
+    `<span class="chip">${esc(t.term)} ${t.count}</span>`).join("");
+
+  const salient = (p.salient || []).map((h) =>
+    `<tr><td class="${h.score >= 0 ? "pos" : "neg"}">${h.score.toFixed(2)}</td>` +
+    `<td>${h.link ? `<a href="${esc(h.link)}" target="_blank" rel="noopener">` +
+      `${esc(h.title)}</a>` : esc(h.title)}</td>` +
+    `<td class="news-src">${esc(h.source)}</td></tr>`).join("");
+
+  const bySource = (p.source_breakdown || []).slice(0, 8).map((r) =>
+    `<span class="chip ${r.mean >= 0.05 ? "pos" : r.mean <= -0.05 ? "neg" : ""}">` +
+    `${esc(r.source)} ${r.mean >= 0 ? "+" : ""}${r.mean.toFixed(2)} (${r.n})</span>`)
+    .join("");
+
+  body.innerHTML = t2Sym(p, p.company || "") + commentaryBlock(p.commentary) +
+    cards + (bar ? `<div class="row">${bar}</div>` : "") +
+    (themes ? `<div class="row chips">${themes}</div>` : "") +
+    (bySource ? `<div class="row chips">${bySource}</div>` : "") +
+    (salient ? `<div class="row tbl-wrap"><table class="data"><thead><tr>` +
+      `<th>Score</th><th>Most salient headlines</th><th>Source</th></tr></thead>` +
+      `<tbody>${salient}</tbody></table></div>` : "") +
+    `<div class="footnote">${esc(p.caveat || "")}</div>`;
+}
+
 function setStatus(msg) { $("#status-line").textContent = msg; }
 
 function showTab(id) {
@@ -1090,13 +1559,19 @@ function showTab(id) {
     s.classList.toggle("active", on);
     s.hidden = !on;
   });
+  // Each tab owns its own controls, so only the active tab's refresh button is
+  // reachable. Without this the SPX Refresh button stays visible on Tab 2 and
+  // runRefresh's blanket disable makes it ambiguous which one is running.
+  $$("[data-tab-controls]").forEach((g) => {
+    g.hidden = g.dataset.tabControls !== id;
+  });
 }
 
-async function runRefresh(endpoint, btn, label) {
+async function runRefresh(endpoint, btn, label, hint) {
   const buttons = $$(".btn");
   buttons.forEach((b) => (b.disabled = true));
   btn.setAttribute("aria-busy", "true");
-  setStatus(`${label}… (the SPX chain is ~13 MB, this takes a few seconds)`);
+  setStatus(`${label}…${hint ? ` (${hint})` : ""}`);
   try {
     const res = await fetch(endpoint, { method: "POST" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1120,7 +1595,26 @@ async function init() {
     b.addEventListener("click", () => showTab(b.dataset.tab)));
 
   $("#btn-tab1").addEventListener("click", (e) =>
-    runRefresh("/api/refresh/tab1", e.currentTarget, "Refreshing SPX regime"));
+    runRefresh("/api/refresh/tab1", e.currentTarget, "Refreshing SPX regime",
+               "the SPX chain is ~13 MB, this takes a few seconds"));
+
+  const symInput = $("#t2-symbol");
+  const runTab2 = (btn) => {
+    const sym = (symInput.value || "").trim().toUpperCase();
+    if (!sym) {
+      setStatus("Enter a US equity ticker first.");
+      symInput.focus();
+      return;
+    }
+    symInput.value = sym;
+    runRefresh(`/api/refresh/tab2?symbol=${encodeURIComponent(sym)}`, btn,
+               `Analysing ${sym}`,
+               "five sources, ~10 seconds");
+  };
+  $("#btn-tab2").addEventListener("click", (e) => runTab2(e.currentTarget));
+  symInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") runTab2($("#btn-tab2"));
+  });
 
   setStatus("Loading last session…");
   try {

@@ -134,9 +134,105 @@ cross-check; the option-chain payload carries its own spot.
 
 ---
 
+# Tab 2 — per-ticker sources
+
+**Verification date: 2026-08-15.** All key-free. One **Analyse** press touches five
+hosts and makes roughly ten requests.
+
+## 7. Option chains, any ticker — CBOE ✅
+
+`https://cdn.cboe.com/api/global/delayed_quotes/options/{SYMBOL}.json`
+
+Same envelope and headers as §1. Verified across the price and liquidity range:
+
+| Symbol | Payload | Contracts | Spot |
+|---|---|---|---|
+| NVDA | 1.70 MB | 3,794 | 224.75 |
+| QQQ | — | 4,846 | 730.85 |
+| WEN | 249 KB | 566 | 8.61 |
+
+- `data.iv30` is a ready-made 30-day implied vol — **quoted in percent (52.421) while
+  per-contract `iv` is a decimal (0.524)**. Normalise before comparing.
+- `data.security_type` distinguishes `stock` from ETFs; used to suppress issuer filings.
+- Untraded contracts carry `iv: 0` (110 of WEN's 566) — filter before interpolating.
+- A payload for a short root can contain adjacent roots, so the OCC regex must reject
+  any root that is not the requested symbol.
+
+## 8. Fundamentals, short interest, ownership, analyst — Finviz ✅ (scrape)
+
+`https://finviz.com/quote.ashx?t={SYMBOL}&p=d` with a browser `User-Agent`. 309 KB,
+**83 snapshot fields plus a 100-row news table in one request** — by far the best
+signal-per-request available.
+
+- ⚠ **`finvizfinance`'s `Quote.ticker_fundament()` is BROKEN** against the current
+  page (`AttributeError` at `quote.py:145`). Scrape directly with `requests` + `bs4`.
+  The library's *screener* is unaffected.
+- ⚠ The snapshot is split across **six** `table.snapshot-table2` elements. Use
+  `soup.select(...)` (plural) for ~168 cells; `select_one` silently returns 14 pairs.
+- ⚠ Two values are packed into single cells as sibling `<span>`s with **no delimiter**:
+  `52W Low` → `'164.0737.23%'`. Parse with `get_text(separator="\x1f", strip=True)`.
+- `Recom` is inverted: 1 = Strong Buy … 5 = Strong Sell.
+- `Earnings` carries **no year** (`'Aug 26 AMC'`) — infer the nearest.
+- `-` and `''` mean missing, never zero.
+
+## 9. Retail sentiment — StockTwits ✅
+
+`https://api.stocktwits.com/api/2/streams/symbol/{SYMBOL}.json`
+
+30 messages per page; paginate with `?max=<cursor.max>` while `cursor.more`. Crucially,
+many messages carry a **self-declared** position in `entities.sentiment.basic`
+(`Bullish`/`Bearish`) — a stated position rather than an inferred one. WEN returned
+57 bullish / 9 bearish / 24 untagged across three pages.
+
+Bodies arrive with HTML entities intact (`Wendy&#39;s`); unescape before tokenising.
+
+## 10. News — Google News, Seeking Alpha, Finviz ✅
+
+| Source | URL | Result |
+|---|---|---|
+| Google News | `https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en` | 100 entries |
+| Seeking Alpha | `https://seekingalpha.com/api/sa/combined/{SYMBOL}.xml` | 30 entries |
+| Finviz | the `#news-table` from §8 | 100 rows, free |
+
+**Query on the company name, not the ticker.** `WEN stock when:7d` returns 73 entries;
+`"Wendy's" stock OR earnings when:7d` returns 100 with better coverage — three-letter
+tickers collide with ordinary words. Strip the trailing `" - Publisher"` Google appends.
+
+Finviz prints a full date stamp only on the first row of each day; later rows carry a
+bare time and must inherit the date above them.
+
+## 11. SEC filings — EDGAR ✅
+
+`https://www.sec.gov/files/company_tickers.json` (10,396 tickers → CIK), then
+`https://data.sec.gov/submissions/CIK{cik10}.json`.
+
+**Requires a declared `User-Agent` carrying a contact address** — a browser UA is
+against SEC policy and gets blocked. The ticker map is ~1 MB and changes weekly, so it
+is cached in the `kv` table with a 7-day TTL.
+
+- `filings.recent` holds parallel arrays; NVDA and WEN each return ~1,000 entries.
+- 8-K **item 2.02** is the earnings release — the anchor for post-earnings move history.
+- Form codes are irregular: `SCHEDULE 13D/A` and `SC 13D` both occur, and `424B5`
+  starts with "4" but is an offering, not a Form 4.
+
+---
+
 ## Sources deliberately not used
 
 - Any paid or authenticated feed (ORATS, Polygon, Theta Data, SpotGamma, CBOE DataShop).
 - Third-party scrapers of VX term structure (e.g. vixcentral) — the parity method above
   is first-party and more robust.
 - ES futures intraday volume — no free source exists; SPY RTH is the agreed substitute.
+
+## Tab 2 sources tried and rejected ❌
+
+Re-verified 2026-08-15. Do not reintroduce these without re-probing.
+
+| Source | Why not |
+|---|---|
+| `feeds.finance.yahoo.com/rss/2.0/headline?s={SYM}` | Returns 200 and looks fine, but is **not ticker-filtered** — an NVDA query returned Hasbro and Mastercard headlines. The most dangerous of these, because it fails silently. |
+| `yfinance Ticker.news` | Same problem: generic market news, not the symbol's. |
+| `www.nasdaq.com/feed/rssoutbound?symbol=` | Times out. |
+| Reddit site-wide `/search.rss` | HTTP 429 almost immediately. |
+| Reddit `r/wallstreetbets/search.rss` | Works, but returns very few entries and rate-limits. Wired in as **best-effort only** — swallowed on any failure, never allowed to fail the panel. |
+| `finvizfinance` `Quote` class | Broken against current HTML — see §8. |

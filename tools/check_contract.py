@@ -4,8 +4,14 @@ The frontend and the panels are only coupled by the shape of these dicts, so a
 renamed key fails silently as a blank card. This walks the required paths for
 each renderer against a running server.
 
-    python app.py                 # in another shell
-    python tools/check_contract.py
+    python app.py                                   # in another shell
+    python tools/check_contract.py                  # Tab 1 (default)
+    python tools/check_contract.py --panels tab2    # after analysing a ticker
+    python tools/check_contract.py --panels all
+
+Tab 2 is opt-in because its panels hold no payload until a ticker has been
+analysed; requiring them by default would fail the Tab 1 check on a fresh
+database.
 
 Exits non-zero if anything is missing.
 """
@@ -108,10 +114,88 @@ REQUIRED = {
     ],
 }
 
+# Tab 2 is checked separately: its panels are empty until a ticker has been
+# analysed, so requiring them unconditionally would fail the Tab 1 check on a
+# fresh database. Select with `--panels tab2` (or `all`).
+REQUIRED_TAB2 = {
+    "t2_sentiment": [
+        "symbol", "composite", "confidence", "band", "label", "missing",
+        "caveat", "flags.amplifying",
+        "subscores[].key", "subscores[].label", "subscores[].score",
+        "subscores[].weight", "subscores[].weight_eff", "subscores[].available",
+        "subscores[].reading",
+        "divergences[].key", "divergences[].severity", "divergences[].label",
+        "divergences[].sentence",
+        "commentary.headline", "commentary.sentences", "commentary.warnings",
+    ],
+    "t2_positioning": [
+        "symbol", "spot", "regime", "zero_gamma", "cushion_pct", "net_gex",
+        "dex", "gross_dex", "vanna_pressure", "charm_drift", "call_wall",
+        "put_wall", "bucket", "display_pct", "snapshot_ts", "n_contracts",
+        "zero_dte_gamma_share", "expiry_window_days",
+        "oi_magnets[].strike", "oi_magnets[].oi",
+        "chart[].strike", "chart[].call_gex", "chart[].put_gex",
+        "commentary.headline", "commentary.sentences",
+    ],
+    "t2_vol": [
+        "symbol", "spot", "n_contracts", "iv30", "atm_iv",
+        "skew_25d", "skew_25d_pct", "skew_state", "skew_expiry",
+        "pcr_oi", "pcr_vol", "pcr_oi_state", "pcr_vol_state",
+        "term_slope", "term_state", "rv20", "ivrv_spread", "ivrv_state",
+        "max_pain", "max_pain_dist_pct", "iv_rank", "history_days",
+        "history_needed", "thin_chain",
+        "term[].expiry", "term[].dte", "term[].atm_iv", "term[].n",
+        "commentary.headline", "commentary.sentences",
+    ],
+    "t2_squeeze": [
+        "symbol", "company", "spot", "market_cap", "short_float",
+        "short_interest", "days_to_cover", "squeeze_score", "squeeze_band",
+        "inst_own", "inst_trans", "insider_own", "insider_trans",
+        "target_price", "target_upside", "recom", "recom_label",
+        "rsi", "rel_volume", "sma20", "sma50", "sma200",
+        "from_high", "from_low", "perf_week", "perf_month",
+        "trend.state", "trend.label",
+        "commentary.headline", "commentary.sentences",
+    ],
+    "t2_social": [
+        "symbol", "n", "empty", "bullish", "bearish", "untagged", "tagged",
+        "bull_pct", "blended", "tone", "unique_users", "thin", "partial",
+        "velocity_ratio", "velocity_state", "velocity_days", "velocity_needed",
+        "top_terms[].term", "top_terms[].count",
+        "top[].body", "top[].score",
+        "reddit.available",
+        "commentary.headline", "commentary.sentences",
+    ],
+    "t2_news": [
+        "symbol", "count", "empty", "tone", "mean", "caveat",
+        "sentiment.tone", "sentiment.mean", "sentiment.n",
+        "sentiment.pos", "sentiment.neg", "sentiment.neu",
+        "sentiment.pos_pct", "sentiment.neg_pct", "sentiment.neu_pct",
+        "themes[].term", "themes[].count",
+        "salient[].title", "salient[].link", "salient[].source", "salient[].score",
+        "source_breakdown[].source", "source_breakdown[].mean",
+        "source_breakdown[].n",
+        "feeds[].feed", "feeds[].n",
+        "commentary.headline", "commentary.sentences",
+    ],
+    "t2_events": [
+        "symbol", "earnings_date", "earnings_when", "earnings_days_out",
+        "earnings_soon", "implied_move", "implied_expiry", "covers_earnings",
+        "move_ratio", "move_state", "market_cap",
+        "historical_moves.n", "historical_moves.mean_abs",
+        "historical_moves.moves",
+        "filings.available",
+        "commentary.headline", "commentary.sentences",
+    ],
+}
+
 # Paths that are allowed to be absent because the list they live in may be
 # legitimately empty on a given day.
 OPTIONAL_IF_EMPTY = {"naked_pocs", "lvn_zones", "oi_magnets", "confluence",
-                     "destabilisers"}
+                     "destabilisers",
+                     # Tab 2: all legitimately empty for some tickers.
+                     "divergences", "themes", "salient", "source_breakdown",
+                     "feeds", "term", "top_terms", "top", "chart", "moves"}
 
 
 def resolve(obj, path: str):
@@ -136,11 +220,26 @@ def resolve(obj, path: str):
 
 
 def main() -> int:
+    args = sys.argv[1:]
+    which = "tab1"
+    if "--panels" in args:
+        i = args.index("--panels")
+        which = args[i + 1] if i + 1 < len(args) else ""
+    if which not in ("tab1", "tab2", "all"):
+        print(f"unknown --panels {which!r}; choose tab1, tab2 or all")
+        return 2
+
+    required = {}
+    if which in ("tab1", "all"):
+        required.update(REQUIRED)
+    if which in ("tab2", "all"):
+        required.update(REQUIRED_TAB2)
+
     with urllib.request.urlopen(URL, timeout=30) as r:
         state = json.load(r)
 
     failures, notes = [], []
-    for key, paths in REQUIRED.items():
+    for key, paths in required.items():
         rec = state.get(key)
         if not rec or not rec.get("payload"):
             failures.append(f"{key}: no payload (status={(rec or {}).get('status')})")
@@ -164,9 +263,9 @@ def main() -> int:
         for f in failures:
             print(f"  FAIL  {f}")
         return 1
-    total = sum(len(v) for v in REQUIRED.values())
+    total = sum(len(v) for v in required.values())
     print(f"\nOK — all {total} frontend field paths present across "
-          f"{len(REQUIRED)} panels.")
+          f"{len(required)} panels ({which}).")
     return 0
 
 

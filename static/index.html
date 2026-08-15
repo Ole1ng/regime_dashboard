@@ -22,7 +22,7 @@
       </button>
       <button class="tab" role="tab" data-tab="tab2"
               aria-selected="false" aria-controls="panel-tab2" id="tabbtn-tab2">
-        TAB 2
+        TICKER SENTIMENT
       </button>
       <button class="tab" role="tab" data-tab="tab3"
               aria-selected="false" aria-controls="panel-tab3" id="tabbtn-tab3">
@@ -30,10 +30,24 @@
       </button>
     </nav>
 
+    <!-- Control groups are tab-scoped: showTab() reveals only the active tab's
+         group, so there is never more than one refresh button on screen and it
+         is always unambiguous which tab it acts on. -->
     <div class="controls" role="group" aria-label="Manual data refresh">
-      <button id="btn-tab1" type="button" class="btn">
-        <span class="btn-label">Refresh</span>
-      </button>
+      <div class="tab-controls" data-tab-controls="tab1">
+        <button id="btn-tab1" type="button" class="btn">
+          <span class="btn-label">Refresh</span>
+        </button>
+      </div>
+      <div class="tab-controls" data-tab-controls="tab2" hidden>
+        <input id="t2-symbol" class="sym-input" type="text" maxlength="6"
+               autocomplete="off" autocapitalize="characters" spellcheck="false"
+               placeholder="TICKER" aria-label="US equity ticker symbol" />
+        <button id="btn-tab2" type="button" class="btn">
+          <span class="btn-label">Analyse</span>
+        </button>
+      </div>
+      <div class="tab-controls" data-tab-controls="tab3" hidden></div>
     </div>
   </header>
 
@@ -191,21 +205,150 @@
       </div>
     </section>
 
-    <!-- ===================== TAB 2 — reserved ===================== -->
-    <!-- The user will be building on this project and adding to these tabs.
-         Adding one means three things: a nav button above carrying
-         data-tab="tabN", a tabpanel section here with id="panel-tabN", and a
-         render function registered in the RENDERERS map in app.js. Tab
-         switching itself is generic and needs no change. -->
+    <!-- ===================== TAB 2 — TICKER SENTIMENT ===================== -->
+    <!-- Panel skeletons are declarative: each needs only an id of
+         "panel-<store key>" plus [data-badge], [data-updated] and [data-body].
+         The renderer is registered in the RENDERERS map in app.js. -->
     <section class="tabpanel" id="panel-tab2" role="tabpanel"
              aria-labelledby="tabbtn-tab2" hidden>
       <div class="grid">
-        <section class="panel panel-full placeholder">
-          <div class="panel-head"><h2>Tab 2</h2></div>
+
+        <!-- Composite (full width, top) -->
+        <section class="panel panel-full panel-regime" id="panel-t2_sentiment"
+                 aria-labelledby="h-t2-sentiment">
+          <div class="panel-head">
+            <h2 id="h-t2-sentiment">Composite Sentiment</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- Dealer positioning -->
+        <section class="panel panel-half" id="panel-t2_positioning"
+                 aria-labelledby="h-t2-positioning">
+          <div class="panel-head">
+            <h2 id="h-t2-positioning">Dealer Positioning</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- Options / volatility sentiment -->
+        <section class="panel panel-half" id="panel-t2_vol"
+                 aria-labelledby="h-t2-vol">
+          <div class="panel-head">
+            <h2 id="h-t2-vol">Options &amp; Volatility</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- Squeeze / ownership / analyst -->
+        <section class="panel panel-third" id="panel-t2_squeeze"
+                 aria-labelledby="h-t2-squeeze">
+          <div class="panel-head">
+            <h2 id="h-t2-squeeze">Squeeze &amp; Ownership</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- Retail social -->
+        <section class="panel panel-third" id="panel-t2_social"
+                 aria-labelledby="h-t2-social">
+          <div class="panel-head">
+            <h2 id="h-t2-social">Retail Chatter</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- Earnings & catalysts -->
+        <section class="panel panel-third" id="panel-t2_events"
+                 aria-labelledby="h-t2-events">
+          <div class="panel-head">
+            <h2 id="h-t2-events">Earnings &amp; Catalysts</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- News & sentiment -->
+        <section class="panel panel-full" id="panel-t2_news"
+                 aria-labelledby="h-t2-news">
+          <div class="panel-head">
+            <h2 id="h-t2-news">News &amp; Sentiment</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- Caveats (collapsed by default) -->
+        <section class="panel panel-full" id="panel-t2-caveats"
+                 aria-labelledby="h-t2-caveats">
+          <div class="panel-head">
+            <h2 id="h-t2-caveats">What this can and cannot do</h2>
+          </div>
           <div class="panel-body">
-            <p class="empty-note">Reserved — coming soon.</p>
+            <details class="caveats">
+              <summary>Read this before trading off the panel</summary>
+              <ul>
+                <li><strong>The composite is a summary, not a signal.</strong> Six
+                  loosely-correlated sentiment proxies blended into one number is
+                  navigation. The sub-score breakdown and the divergences between
+                  them are the actual output.</li>
+                <li><strong>Sentiment analysis here is extractive.</strong> VADER
+                  with a finance and WSB lexicon measures the <em>tone</em> of
+                  headlines and posts, not whether the news is good for the equity.
+                  A takeover premium and a short-seller report can both read
+                  positive.</li>
+                <li><strong>Dealer gamma is about volatility, not direction.</strong>
+                  Positive gamma damps moves and negative gamma amplifies them;
+                  neither is bullish. Direction here comes from the flip level, wall
+                  structure and open-interest gravity, and gamma only flags
+                  amplification risk.</li>
+                <li><strong>Short interest is fuel, not a direction.</strong> A
+                  heavily shorted name that is rising has squeeze potential; the same
+                  short interest on a falling name means the shorts are winning.</li>
+                <li><strong>StockTwits skews bullish at baseline.</strong> A 70% bull
+                  ratio is close to its resting state. Velocity against this ticker's
+                  own history is the signal, and that needs days of stored snapshots
+                  before it means anything.</li>
+                <li><strong>Retail sentiment is positioning, not insight.</strong> It
+                  is most useful as a contrarian input at extremes and when it
+                  conflicts with what insiders and the options market are doing.</li>
+                <li><strong>Finviz is scraped, not an API.</strong> A layout change
+                  breaks short interest, ownership and analyst data at once. The panel
+                  degrades to a stale badge rather than guessing.</li>
+                <li><strong>The option chain is ~15 minutes delayed</strong> and the
+                  dealer convention (long calls, short puts) is a rougher proxy for a
+                  single name than it is for an index.</li>
+              </ul>
+            </details>
           </div>
         </section>
+
       </div>
     </section>
 
