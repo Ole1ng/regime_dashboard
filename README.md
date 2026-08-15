@@ -33,15 +33,30 @@ and rule-based.
 
 ## What the panels show
 
+Panels appear on Tab 1 in this order, reading from the regime call down to the
+context that produced it:
+
 | Panel | Question it answers | RESEARCH.md |
 |---|---|---|
 | **Regime** | Which of the four regimes is in force, what would invalidate it, and which price levels have independent confirmation | Composing Them |
-| **Expiration Calendar** | What is scheduled, and when the mechanical drift dies | §6, §3 |
 | **SPX Dealer Positioning** | Is the tape self-damping or self-amplifying; where are the walls; what flow is coming | §1, §2 |
-| **SPY Cross-Check** | Does the retail/ETF book agree with the institutional one | §1 |
+| **SPY Dealer Positioning** | The same read on the retail/ETF book — an independent second opinion, and a confluence lens in its own right | §1, §2 |
+| **Auction Structure** | Where participants agreed on value, and which corridors price travels fast | §4 |
+| **CFTC Trader Positioning** | Where speculative and real-money futures traders are positioned, and whether that is crowded | — |
 | **VIX Term Structure** | Contango or backwardation — is vol supply being paid or punished | §3 |
 | **Implied Correlation** | How much single-stock energy reaches the index, and is dispersion crowded | §5 |
-| **Auction Structure** | Where participants agreed on value, and which corridors price travels fast | §4 |
+| **Expiration Calendar** | What is scheduled, and when the mechanical drift dies | §6, §3 |
+
+The two dealer-positioning panels sit side by side at equal width and use
+deliberately different charts. SPX splits call and put gamma to either side of
+the axis — "what is stacked at this strike". SPY plots their **sum**, one bar
+per strike, green where dealers are net long gamma and red where they are net
+short — "which way does hedging push if price gets here". The flip is where the
+running total crosses zero, so it reads directly off the colour change.
+
+CFTC positioning is the one panel the regime classifier does not consume: COT
+data is weekly, released on a ~3-day lag, and cannot inform a same-session
+regime call. It is slow-moving context, not an input.
 
 The auction panel uses the standard market-profile layout: 30-minute SPY candles
 on the left, the composite volume profile rotated on the right, both on **one
@@ -124,6 +139,16 @@ regression test.
   `997.9999999999999` in IEEE and naively floors to 997, shifting a whole
   session's profile by one bin and relocating its POC.
 
+- **The SPY panel kept the `gamma_spy` key when its module changed.**
+  `spy_positioning.py` replaced `gamma_engine.refresh(SPY)` behind the same
+  panel key, because `regime.confluence` reads `spot` / `call_wall` /
+  `put_wall` off that key to score the SPY book as an independent lens. Renaming
+  the key would not raise — the level would just quietly stop scoring — so
+  `test_spy_positioning.py` asserts those fields exist *and* runs the payload
+  through `regime.confluence` to prove "SPY book" still appears.
+  `gamma_engine.SPY` still exists: the tests use it to check that the SPX
+  thresholds are scale-separated from SPY's.
+
 ---
 
 ## Layout
@@ -133,7 +158,9 @@ app.py                  FastAPI entry point (port 8020)
 store.py                SQLite persistence, one JSON payload per panel
 panels/
   _bs.py                Black-Scholes greeks (vanna/charm/gamma/delta)
-  gamma_engine.py       SPX + SPY dealer positioning, charm projection
+  gamma_engine.py       SPX dealer positioning, charm projection
+  spy_positioning.py    SPY dealer positioning (panel key `gamma_spy`)
+  cftc_positioning.py   CFTC Commitments of Traders, 3-year normalised
   vix_structure.py      VX forwards via put-call parity, term structure
   correlation.py        COR1M/COR3M with 2006-present percentiles
   volume_profile.py     SPY auction structure, naked POCs, LVN corridors
@@ -153,10 +180,11 @@ tools/
 ## Tests
 
 ```bash
-python -m pytest panels/ -q          # 156 tests, no network
+python -m pytest panels/ -q          # 196 tests, no network
 python tools/check_contract.py       # frontend field contract (server running)
 node tools/render_check.js           # renderer output + chart geometry
 python tools/calibrate.py            # live magnitudes vs thresholds
+python tools/smoke.py [panel ...]    # one panel's refresh() against live data
 ```
 
 `render_check.js` runs the real renderers against live payloads under a stubbed

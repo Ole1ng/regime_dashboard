@@ -26,6 +26,7 @@ PANEL_KEYS = [
     "correlation",
     "volume_profile",
     "calendar",
+    "cftc_positioning",
     "regime",
 ]
 

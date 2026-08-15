@@ -5,9 +5,10 @@ const RENDERERS = {
   regime: renderRegime,
   calendar: renderCalendar,
   gamma_spx: (b, p) => renderGamma(b, p, true),
-  gamma_spy: (b, p) => renderGamma(b, p, false),
+  gamma_spy: renderSpyPositioning,
   vix_structure: renderVix,
   correlation: renderCorrelation,
+  cftc_positioning: renderCftcPositioning,
   volume_profile: renderProfile,
 };
 
@@ -52,6 +53,15 @@ function usd(x) {
 function px(x, dp = 2) {
   return x == null ? "—" : Number(x).toLocaleString(undefined, {
     minimumFractionDigits: dp, maximumFractionDigits: dp });
+}
+// Plain counts (futures contracts), not dollars — see usd() for money.
+function fmtNum(n) {
+  if (n == null) return "—";
+  const a = Math.abs(n);
+  if (a >= 1e9) return (n / 1e9).toFixed(2) + "B";
+  if (a >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  if (a >= 1e3) return (n / 1e3).toFixed(1) + "K";
+  return String(n);
 }
 function pct(frac, dp = 2) {
   return frac == null ? "—" : `${(frac * 100).toFixed(dp)}%`;
@@ -376,6 +386,267 @@ function renderGamma(body, p, primary) {
     `<div class="footnote">${esc((p.charm_projection || {}).assumption || "")} ` +
     `Monday bars absorb the weekend, so they run larger.</div></div>` +
     footer;
+}
+
+// --------------------------------------------------------------------------
+// SPY dealer positioning
+// --------------------------------------------------------------------------
+//
+// The full SPY book, not a cross-check. Its chart deliberately differs from the
+// SPX one above: SPX splits call and put gamma to either side of the axis,
+// whereas this shows their *sum* per strike — one bar, green where dealers are
+// net long gamma at that price and red where they are net short. The split view
+// answers "what is stacked here"; the net view answers "which way does hedging
+// push if price gets here", which is the question the level ladder below is
+// asking. Geometry is otherwise identical to gexChart so the two panels read as
+// siblings side by side.
+
+function spyNetGexChart(p) {
+  const chart = (p.chart || []).slice().sort((a, b) => b.strike - a.strike);
+  if (!chart.length) return `<p class="empty-note">No strike data in window.</p>`;
+
+  // net_gex is served by the panel; fall back for payloads cached before it
+  // existed, so a stale row renders rather than blanking the chart.
+  const netOf = (c) => (c.net_gex != null ? c.net_gex
+    : (c.call_gex || 0) + (c.put_gex || 0));
+
+  const n = chart.length;
+  const rowH = 18, padTop = 24, padBot = 12;
+  const H = padTop + padBot + n * rowH;
+  const W = 1000, cx = 500, half = 415, gutter = 42;
+  let maxAbs = 0;
+  chart.forEach((c) => { maxAbs = Math.max(maxAbs, Math.abs(netOf(c))); });
+  maxAbs = maxAbs || 1;
+
+  const strikes = chart.map((c) => c.strike);
+  const maxK = strikes[0], minK = strikes[n - 1];
+  const yFirst = padTop + rowH / 2, yLast = padTop + (n - 1) * rowH + rowH / 2;
+  const yOf = (price) => {
+    if (price == null || maxK === minK) return null;
+    const f = Math.min(1, Math.max(0, (maxK - price) / (maxK - minK)));
+    return yFirst + f * (yLast - yFirst);
+  };
+
+  let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" ` +
+    `aria-label="Net dealer gamma exposure per strike; positive right in green, ` +
+    `negative left in red">`;
+  svg += `<line x1="${cx}" y1="${padTop - 8}" x2="${cx}" y2="${H - padBot + 4}" class="gex-axis"/>`;
+
+  const bucket = p.bucket || 5;
+  const magnets = new Set((p.oi_magnets || []).map(
+    (m) => Math.round(m.strike / bucket) * bucket));
+
+  chart.forEach((c, i) => {
+    const y = padTop + i * rowH + rowH / 2;
+    const net = netOf(c);
+    const w = (Math.abs(net) / maxAbs) * half;
+    const pos = net >= 0;
+    const x = pos ? cx + gutter : cx - gutter - w;
+    if (w > 0.5)
+      svg += `<rect class="${pos ? "gex-net-pos" : "gex-net-neg"}" x="${x}" ` +
+        `y="${y - rowH * 0.32}" width="${w}" height="${rowH * 0.64}">` +
+        `<title>${px(c.strike, 0)} net gamma ${usd(net)} ` +
+        `(calls ${usd(c.call_gex)}, puts ${usd(c.put_gex)})</title></rect>`;
+    svg += `<text class="gex-strike" x="${cx}" y="${y + 3}" text-anchor="middle">` +
+      `${px(c.strike, 0)}</text>`;
+    if (magnets.has(Math.round(c.strike / bucket) * bucket)) {
+      const mx = pos ? x + w + 8 : x - 8;
+      svg += `<circle class="gex-magnet" cx="${mx}" cy="${y}" r="3">` +
+        `<title>High open-interest magnet</title></circle>`;
+    }
+  });
+
+  const ys = yOf(p.spot);
+  if (ys != null) {
+    svg += `<line class="gex-spot" x1="30" y1="${ys}" x2="${W - 20}" y2="${ys}"/>`;
+    svg += `<text class="gex-spot-lbl" x="34" y="${ys - 4}">Spot ${px(p.spot)}</text>`;
+  }
+  const yz = yOf(p.zero_gamma);
+  if (yz != null) {
+    svg += `<line class="gex-zero" x1="30" y1="${yz}" x2="${W - 20}" y2="${yz}"/>`;
+    svg += `<text class="gex-zero-lbl" x="${W - 24}" y="${yz - 4}" text-anchor="end">` +
+      `Flip ${px(p.zero_gamma)}</text>`;
+  }
+  const yc = yOf(p.call_wall);
+  if (yc != null)
+    svg += `<text class="gex-wall call" x="${W - 24}" y="${yc + 3}" text-anchor="end">` +
+      `Call wall</text>`;
+  const yp = yOf(p.put_wall);
+  if (yp != null)
+    svg += `<text class="gex-wall put" x="20" y="${yp + 3}">Put wall</text>`;
+
+  svg += `</svg>` +
+    `<div class="footnote">One bar per strike: call gamma plus put gamma. ` +
+    `<span class="lgd-pos">Green</span> = dealers net long gamma there ` +
+    `(hedging damps moves through it); <span class="lgd-neg">red</span> = net ` +
+    `short (hedging amplifies). The flip is where the running total crosses zero.` +
+    `</div>`;
+  return svg;
+}
+
+function renderSpyPositioning(body, p) {
+  if (!p || p.spot == null) {
+    body.innerHTML = `<p class="empty-note">No data yet — press ` +
+      `<strong>Refresh</strong> to fetch the CBOE SPY chain.</p>`;
+    return;
+  }
+  const pos = p.regime === "positive";
+  const flipSub = p.zero_gamma == null ? "no flip in ±8%" : `Flip ${px(p.zero_gamma)}`;
+  const dexShort = (p.dex || 0) < 0;
+
+  const cards =
+    `<div class="row cards cards-4">` +
+    card("Regime", pos ? "Positive" : "Negative", flipSub, pos ? "pos" : "neg") +
+    card("Spot vs flip", p.cushion_pct == null ? "—" : signed(p.cushion_pct),
+         `Spot ${px(p.spot)}`, cls(p.cushion_pct)) +
+    card("Net GEX", usd(p.net_gex), "per 1% move", cls(p.net_gex)) +
+    card("DEX bias", usd(p.dex),
+         dexShort ? "dealers net short delta" : "dealers net long delta",
+         cls(p.dex)) +
+    `</div>`;
+
+  const vannaSub = p.vanna_pressure == null ? "—"
+    : (p.vanna_pressure >= 0
+      ? "falling IV forces dealer buying"
+      : "rising IV forces dealer selling");
+  const charmSub = (p.charm_drift || 0) >= 0
+    ? "drift to buy into the close"
+    : "drift to sell into the close";
+
+  const cards2 =
+    `<div class="row cards cards-3">` +
+    card("Vanna", usd(p.vanna_pressure), vannaSub, cls(p.vanna_pressure)) +
+    card("Charm drift", `${usd(p.charm_drift)}/day`, charmSub, cls(p.charm_drift)) +
+    card("0DTE gamma", pct(p.zero_dte_gamma_share, 0), "of visible gamma",
+         (p.zero_dte_gamma_share || 0) > 0.35 ? "warn" : "") +
+    `</div>`;
+
+  const levels = [];
+  if (p.call_wall != null) levels.push(["Call wall", p.call_wall]);
+  (p.oi_magnets || []).forEach((m) => levels.push(["OI magnet", m.strike]));
+  if (p.zero_gamma != null) levels.push(["Zero gamma", p.zero_gamma]);
+  if (p.put_wall != null) levels.push(["Put wall", p.put_wall]);
+  levels.push(["Spot", p.spot]);
+  levels.sort((a, b) => b[1] - a[1]);
+  const levelsTbl = `<div class="tbl-wrap"><table class="data">` +
+    `<thead><tr><th>Level</th><th>Price</th><th>vs spot</th></tr></thead><tbody>` +
+    levels.map(([k, v]) =>
+      `<tr><td>${esc(k)}</td><td>${px(v)}</td>` +
+      `<td class="${cls(v - p.spot)}">${signed((v - p.spot) / p.spot)}</td></tr>`
+    ).join("") + `</tbody></table></div>`;
+
+  const footer =
+    `<div class="footnote">CBOE delayed snapshot ${esc(p.snapshot_ts || "")} · ` +
+    `~15-min delayed · expirations ≤ ${p.expiry_window_days || 90}d · ` +
+    `${(p.n_contracts || 0).toLocaleString()} contracts · ` +
+    `assumes dealers long calls / short puts.</div>`;
+
+  body.innerHTML =
+    commentaryBlock(p.commentary) + cards +
+    `<div class="row">${spyNetGexChart(p)}</div>` +
+    cards2 + `<div class="row">${levelsTbl}</div>` + footer;
+}
+
+// --------------------------------------------------------------------------
+// CFTC trader positioning
+// --------------------------------------------------------------------------
+
+// A 0-100 horizontal gauge: state colours the fill, the number is the 3-yr
+// percentile. `secondary` renders the thinner Asset-Managers variant.
+function cftcGauge(label, block, secondary) {
+  if (!block) return "";
+  const pctl = block.pctl == null ? 0 : block.pctl;
+  const w = Math.max(0, Math.min(100, pctl));
+  const state = block.state || "neutral";
+  const klass = secondary ? "cftc-gauge secondary" : "cftc-gauge";
+  const aria = `${label}: ${pctl.toFixed(0)}th percentile over 3 years, ` +
+    `net ${fmtNum(block.net)} contracts`;
+  return `<div class="cftc-gauge-row">` +
+    `<div class="cftc-gauge-label">${esc(label)}</div>` +
+    `<div class="${klass}" role="img" aria-label="${esc(aria)}">` +
+      `<div class="cftc-gauge-fill s-${esc(state)}" style="width:${w}%"></div>` +
+    `</div>` +
+    `<div class="cftc-gauge-num">${pctl.toFixed(0)}</div></div>`;
+}
+
+// Compact net-position-vs-price sparkline (dual independent scales) so a
+// price/positioning divergence is visible at a glance.
+function cftcSpark(series) {
+  const pts = (series || []).filter((d) => d.lev_net != null);
+  if (pts.length < 2) return "";
+  const W = 1000, H = 90, padL = 4, padR = 4, padT = 8, padB = 8;
+  const n = pts.length;
+  const xs = (i) => padL + (i / (n - 1)) * (W - padL - padR);
+
+  const nets = pts.map((d) => d.lev_net);
+  const nmin = Math.min(...nets, 0), nmax = Math.max(...nets, 0);
+  const nrange = (nmax - nmin) || 1;
+  const yNet = (v) => padT + (1 - (v - nmin) / nrange) * (H - padT - padB);
+
+  const prices = pts.map((d) => d.price).filter((v) => v != null);
+  let pricePath = "";
+  if (prices.length >= 2) {
+    const pmin = Math.min(...prices), pmax = Math.max(...prices);
+    const pr = (pmax - pmin) || 1;
+    const yP = (v) => padT + (1 - (v - pmin) / pr) * (H - padT - padB);
+    pricePath = pts.map((d, i) =>
+      d.price == null ? null
+        : `${i === 0 ? "M" : "L"}${xs(i).toFixed(1)},${yP(d.price).toFixed(1)}`
+    ).filter(Boolean).join(" ");
+  }
+  const netPath = pts.map((d, i) =>
+    `${i === 0 ? "M" : "L"}${xs(i).toFixed(1)},${yNet(d.lev_net).toFixed(1)}`
+  ).join(" ");
+  const yZero = yNet(0).toFixed(1);
+
+  let svg = `<svg class="cftc-spark" viewBox="0 0 ${W} ${H}" ` +
+    `preserveAspectRatio="none" role="img" ` +
+    `aria-label="Leveraged Funds net position versus price over the lookback window">`;
+  svg += `<line class="cftc-spark-zero" x1="0" y1="${yZero}" x2="${W}" y2="${yZero}"/>`;
+  if (pricePath) svg += `<path class="cftc-spark-price" d="${pricePath}"/>`;
+  svg += `<path class="cftc-spark-net" d="${netPath}"/></svg>`;
+  return svg +
+    `<div class="cftc-spark-legend"><span class="net">— LF net</span> · ` +
+    `<span class="price">— price</span></div>`;
+}
+
+function renderCftcPositioning(body, p) {
+  if (!p || !p.contracts || !p.contracts.length) {
+    body.innerHTML = `<p class="empty-note">No data yet — press ` +
+      `<strong>Refresh</strong> to fetch the latest Commitments of Traders report.</p>`;
+    return;
+  }
+  const cards = p.contracts.map((ct) => {
+    const lev = ct.lev || {}, am = ct.am;
+    const state = lev.state || "neutral";
+    const flags = [];
+    if (ct.flags) {
+      if (ct.flags.stale) flags.push(`<span class="cftc-flag stale">stale</span>`);
+      if (ct.flags.price_missing) flags.push(`<span class="cftc-flag">no price</span>`);
+      if (ct.flags.short_history) flags.push(`<span class="cftc-flag">short history</span>`);
+    }
+    const wowSign = lev.wow > 0 ? "+" : "";
+    const netLine = `${lev.net >= 0 ? "net-long" : "net-short"} ` +
+      `${fmtNum(Math.abs(lev.net || 0))} · WoW ${wowSign}${fmtNum(lev.wow)}`;
+    const amLine = am
+      ? `<div class="cftc-meta sub">Asset Managers (real money): net ` +
+        `${am.net >= 0 ? "+" : ""}${fmtNum(am.net)} · secondary read</div>`
+      : "";
+    return `<div class="cftc-contract">` +
+      `<div class="cftc-contract-head">` +
+        `<span class="cftc-contract-label">${esc(ct.label)}</span>${flags.join("")}</div>` +
+      `<div class="cftc-verdict s-${esc(state)}">${esc(lev.verdict || "")}</div>` +
+      cftcGauge("Leveraged Funds", lev, false) +
+      `<div class="cftc-meta">${esc(netLine)}</div>` +
+      `<p class="cftc-sentence">${esc(lev.sentence || "")}</p>` +
+      (am ? cftcGauge("Asset Managers", am, true) : "") +
+      amLine +
+      cftcSpark(ct.series) +
+    `</div>`;
+  }).join("");
+
+  body.innerHTML = `<div class="cftc-grid">${cards}</div>` +
+    `<div class="footnote">As of ${esc(p.as_of || "")} · ${esc(p.caveat || "")}</div>`;
 }
 
 // --------------------------------------------------------------------------

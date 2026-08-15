@@ -269,6 +269,14 @@ svg.chart { width: 100%; height: auto; display: block; }
 .gex-wall.put  { fill: var(--down); }
 .gex-magnet { fill: var(--accent); }
 
+/* Net gamma per strike (SPY panel). Brighter than the split call/put fills
+   above: there is one bar per row rather than two, so the sign is the whole
+   signal and it should read at a glance. */
+.gex-net-pos { fill: var(--up-dk); }
+.gex-net-neg { fill: #8c3227; }
+.lgd-pos { color: var(--up); }
+.lgd-neg { color: var(--down); }
+
 .bar-pos { fill: var(--up-dk); }
 .bar-neg { fill: #6e2a2a; }
 .bar-lbl { fill: var(--fg-dim); font-size: 9.5px; font-family: var(--mono); }
@@ -340,6 +348,118 @@ svg.chart { width: 100%; height: auto; display: block; }
 .tl-ev.alt { top: 30px; }
 .tl-ev:not(.alt) { top: 0; }
 .tl-ev:not(.alt) .tl-dot { order: 2; }
+
+/* ---- CFTC trader positioning ---- */
+/* Ported from market_almanack; the palettes are identical, so every var()
+   below resolves to the same colour it did there. */
+.cftc-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+@media (max-width: 1100px) { .cftc-grid { grid-template-columns: 1fr; } }
+
+.cftc-contract {
+  background: var(--bg-head);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 12px;
+}
+.cftc-contract-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.cftc-contract-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: .5px;
+}
+.cftc-flag {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border-lt);
+  color: var(--fg-dim);
+}
+.cftc-flag.stale { color: var(--amber); border-color: var(--amber); }
+
+.cftc-verdict {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+  border-left: 3px solid var(--fg-dim);
+  background: var(--bg-panel);
+  color: var(--fg);
+}
+.cftc-verdict.s-crowded,
+.cftc-verdict.s-fragile { border-left-color: var(--down); }
+.cftc-verdict.s-squeeze { border-left-color: var(--up); }
+.cftc-verdict.s-neutral { border-left-color: var(--amber); }
+
+.cftc-gauge-row {
+  display: grid;
+  grid-template-columns: 96px 1fr 28px;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 2px;
+}
+.cftc-gauge-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--fg-dim);
+}
+.cftc-gauge {
+  height: 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.cftc-gauge.secondary { height: 6px; }
+.cftc-gauge-fill { height: 100%; transition: width .2s; }
+.cftc-gauge-fill.s-crowded,
+.cftc-gauge-fill.s-fragile { background: var(--down); }
+.cftc-gauge-fill.s-squeeze { background: var(--up); }
+.cftc-gauge-fill.s-neutral { background: var(--amber); }
+.cftc-gauge-num {
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+  color: var(--fg);
+}
+
+.cftc-meta { font-size: 11px; color: var(--fg-dim); }
+.cftc-meta.sub { margin-top: 2px; }
+.cftc-sentence {
+  margin: 6px 0 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+
+svg.cftc-spark {
+  width: 100%;
+  height: 70px;
+  display: block;
+  margin-top: 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.cftc-spark-net   { stroke: var(--accent); stroke-width: 1.5; fill: none; vector-effect: non-scaling-stroke; }
+.cftc-spark-price { stroke: var(--blue); stroke-width: 1.2; fill: none; opacity: .8; vector-effect: non-scaling-stroke; }
+.cftc-spark-zero  { stroke: var(--border-lt); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.cftc-spark-legend { font-size: 10px; color: var(--fg-dim); margin-top: 3px; }
+.cftc-spark-legend .net   { color: var(--accent); }
+.cftc-spark-legend .price { color: var(--blue); }
 
 /* ---- Caveats ---- */
 .caveats summary {

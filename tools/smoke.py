@@ -2,9 +2,9 @@
 
     python tools/smoke.py [panel ...]
 
-Panels: vix, correlation, profile, calendar, gamma, regime. No arguments runs
-everything. Used to check a panel against real data before wiring it into the
-app.
+Panels: vix, correlation, profile, calendar, gamma, spy, cftc, regime. No
+arguments runs everything. Used to check a panel against real data before
+wiring it into the app.
 """
 
 from __future__ import annotations
@@ -90,13 +90,41 @@ def run_gamma() -> None:
             "put_wall", "zero_dte_gamma_share", "n_contracts"])
 
 
+def run_spy() -> None:
+    from panels import spy_positioning as sp
+    p = sp.refresh()
+    show("SPY DEALER POSITIONING", p, [
+        "spot", "regime", "zero_gamma", "cushion_pct", "net_gex", "dex",
+        "vanna_pressure", "charm_drift", "call_wall", "put_wall",
+        "zero_dte_gamma_share", "n_contracts", "bucket"])
+    nets = [c["net_gex"] for c in p["chart"]]
+    pos = sum(1 for v in nets if v >= 0)
+    print(f"\n  chart: {len(nets)} buckets, {pos} net-positive / "
+          f"{len(nets) - pos} net-negative")
+
+
+def run_cftc() -> None:
+    from panels import cftc_positioning as cf
+    p = cf.refresh()
+    show("CFTC TRADER POSITIONING", p, ["as_of", "lookback_weeks"])
+    for ct in p["contracts"]:
+        lev = ct["lev"]
+        print(f"\n  {ct['label']}: net {lev['net']:+,} "
+              f"({lev['pctl']:.0f} %ile, z={lev['z']}, WoW {lev['wow']:+,}) "
+              f"-> {lev['state']}")
+        print(f"    {lev['sentence']}")
+
+
 def run_regime() -> None:
     from panels import regime as rg
     from panels import (calendar_context as cc, correlation as co,
-                        gamma_engine as ge, vix_structure as vs,
-                        volume_profile as vp)
+                        gamma_engine as ge, spy_positioning as sp,
+                        vix_structure as vs, volume_profile as vp)
     spx = ge.refresh(ge.SPX)
-    p = rg.compute({"gamma_spx": spx, "gamma_spy": ge.refresh(ge.SPY),
+    # gamma_spy comes from spy_positioning, matching what app.py stores under
+    # that key — using gamma_engine.SPY here would smoke-test a payload the
+    # dashboard no longer produces.
+    p = rg.compute({"gamma_spx": spx, "gamma_spy": sp.refresh(),
                     "vix_structure": vs.refresh(), "correlation": co.refresh(),
                     "volume_profile": vp.refresh(spx_spot=spx["spot"]),
                     "calendar": cc.refresh()})
@@ -109,7 +137,8 @@ def run_regime() -> None:
 
 
 RUNNERS = {"vix": run_vix, "correlation": run_correlation, "profile": run_profile,
-           "calendar": run_calendar, "gamma": run_gamma, "regime": run_regime}
+           "calendar": run_calendar, "gamma": run_gamma, "spy": run_spy,
+           "cftc": run_cftc, "regime": run_regime}
 
 if __name__ == "__main__":
     names = sys.argv[1:] or list(RUNNERS)

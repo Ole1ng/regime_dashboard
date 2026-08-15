@@ -59,21 +59,10 @@
           <div class="panel-body" data-body aria-live="polite"></div>
         </section>
 
-        <!-- Calendar timeline -->
-        <section class="panel panel-full" id="panel-calendar"
-                 aria-labelledby="h-calendar">
-          <div class="panel-head">
-            <h2 id="h-calendar">Expiration Calendar</h2>
-            <div class="panel-meta">
-              <span class="badge" data-badge></span>
-              <span class="updated" data-updated>—</span>
-            </div>
-          </div>
-          <div class="panel-body" data-body aria-live="polite"></div>
-        </section>
-
-        <!-- SPX gamma (primary, wide) -->
-        <section class="panel panel-two-thirds" id="panel-gamma_spx"
+        <!-- Dealer positioning, side by side: the institutional book (SPX) and
+             the retail/ETF one (SPY), each at half width so neither reads as
+             the other's footnote. -->
+        <section class="panel panel-half" id="panel-gamma_spx"
                  aria-labelledby="h-gamma_spx">
           <div class="panel-head">
             <h2 id="h-gamma_spx">SPX Dealer Positioning</h2>
@@ -85,11 +74,36 @@
           <div class="panel-body" data-body aria-live="polite"></div>
         </section>
 
-        <!-- SPY gamma (cross-check, narrow) -->
-        <section class="panel panel-third" id="panel-gamma_spy"
+        <section class="panel panel-half" id="panel-gamma_spy"
                  aria-labelledby="h-gamma_spy">
           <div class="panel-head">
-            <h2 id="h-gamma_spy">SPY Cross-Check</h2>
+            <h2 id="h-gamma_spy">SPY Dealer Positioning</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- Volume profile -->
+        <section class="panel panel-full" id="panel-volume_profile"
+                 aria-labelledby="h-volume_profile">
+          <div class="panel-head">
+            <h2 id="h-volume_profile">Auction Structure</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- CFTC trader positioning (weekly COT — slow-moving context) -->
+        <section class="panel panel-full" id="panel-cftc_positioning"
+                 aria-labelledby="h-cftc_positioning">
+          <div class="panel-head">
+            <h2 id="h-cftc_positioning">CFTC Trader Positioning</h2>
             <div class="panel-meta">
               <span class="badge" data-badge></span>
               <span class="updated" data-updated>—</span>
@@ -124,11 +138,11 @@
           <div class="panel-body" data-body aria-live="polite"></div>
         </section>
 
-        <!-- Volume profile -->
-        <section class="panel panel-full" id="panel-volume_profile"
-                 aria-labelledby="h-volume_profile">
+        <!-- Calendar timeline -->
+        <section class="panel panel-full" id="panel-calendar"
+                 aria-labelledby="h-calendar">
           <div class="panel-head">
-            <h2 id="h-volume_profile">Auction Structure</h2>
+            <h2 id="h-calendar">Expiration Calendar</h2>
             <div class="panel-meta">
               <span class="badge" data-badge></span>
               <span class="updated" data-updated>—</span>

@@ -22,8 +22,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import store
-from panels import calendar_context, correlation, gamma_engine, regime
-from panels import vix_structure, volume_profile
+from panels import calendar_context, cftc_positioning, correlation, gamma_engine
+from panels import regime, spy_positioning, vix_structure, volume_profile
 
 BASE = Path(__file__).parent
 STATIC = BASE / "static"
@@ -69,11 +69,15 @@ def api_refresh_tab1() -> JSONResponse:
     Panels run in sequence rather than in parallel: the SPX chain is 13 MB and
     the volume profile reuses its spot, so serialising keeps the CBOE request
     rate polite and avoids a duplicate quote.
+
+    One button refreshes the whole tab — there are no per-panel refresh
+    endpoints, so every panel added here must be cheap enough to sit inside a
+    single press.
     """
     out: dict = {}
 
     _run(out, "gamma_spx", lambda: gamma_engine.refresh(gamma_engine.SPX))
-    _run(out, "gamma_spy", lambda: gamma_engine.refresh(gamma_engine.SPY))
+    _run(out, "gamma_spy", spy_positioning.refresh)
     _run(out, "vix_structure", vix_structure.refresh)
     _run(out, "correlation", correlation.refresh)
 
@@ -83,6 +87,11 @@ def api_refresh_tab1() -> JSONResponse:
     _run(out, "volume_profile", lambda: volume_profile.refresh(spx_spot=spx_spot))
 
     _run(out, "calendar", calendar_context.refresh)
+
+    # CFTC runs last of the fetching panels: it is the slowest (three Socrata
+    # queries plus three yfinance histories) and the only one the regime does
+    # not consume, so a hang there leaves every other panel already persisted.
+    _run(out, "cftc_positioning", cftc_positioning.refresh)
 
     # The regime panel is a pure function of the others, so it is computed last
     # from whatever they produced — including any stale payloads still cached

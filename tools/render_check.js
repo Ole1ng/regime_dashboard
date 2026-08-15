@@ -24,9 +24,10 @@ global.document = {
 const src = fs.readFileSync(
   path.join(__dirname, "..", "static", "app.js"), "utf8");
 const api = new Function(
-  src + "\n; return { auctionChart, gexChart, charmChart, vixCurve, corrSpark," +
-        " pctlBar, confluenceTable, renderProfile, renderRegime, renderGamma," +
-        " renderVix, renderCorrelation, renderCalendar };")();
+  src + "\n; return { auctionChart, gexChart, spyNetGexChart, charmChart," +
+        " vixCurve, corrSpark, cftcSpark, cftcGauge, pctlBar, confluenceTable," +
+        " renderProfile, renderRegime, renderGamma, renderSpyPositioning," +
+        " renderCftcPositioning, renderVix, renderCorrelation, renderCalendar };")();
 
 function fetchState() {
   return new Promise((resolve, reject) => {
@@ -84,12 +85,66 @@ function check(name, html) {
   console.log("charts:");
   check("auctionChart", api.auctionChart(P("volume_profile")));
   check("gexChart (SPX)", api.gexChart(P("gamma_spx")));
+  check("spyNetGexChart", api.spyNetGexChart(P("gamma_spy")));
   check("charmChart (SPX)", api.charmChart(P("gamma_spx").charm_projection));
   check("vixCurve", api.vixCurve(P("vix_structure")));
   check("corrSpark", api.corrSpark(P("correlation")));
+  check("cftcSpark", api.cftcSpark(P("cftc_positioning").contracts[0].series));
   check("pctlBar", api.pctlBar(P("correlation").cor1m_pctl_2y));
   check("confluenceTable",
         api.confluenceTable(P("regime").confluence, P("regime").spot));
+
+  // Net-GEX chart geometry: the sign of each bucket decides which side of the
+  // axis its bar sits on and which colour class it carries. A sign error would
+  // still produce valid SVG — it would just be silently wrong — so assert the
+  // two agree with the payload for every bar.
+  console.log("\nnet-GEX chart geometry:");
+  {
+    const spy = P("gamma_spy");
+    const svg = api.spyNetGexChart(spy);
+    const CX = 500, GUTTER = 42, HALF = 415;
+
+    const bars = [...svg.matchAll(
+      /class="gex-net-(pos|neg)" x="([\d.-]+)" y="[\d.-]+" width="([\d.]+)"/g)]
+      .map((m) => ({ sign: m[1], x: Number(m[2]), w: Number(m[3]) }));
+
+    const nets = (spy.chart || []).map(
+      (c) => (c.net_gex != null ? c.net_gex : c.call_gex + c.put_gex));
+    const drawable = nets.filter(
+      (v) => (Math.abs(v) / Math.max(...nets.map(Math.abs), 1)) * HALF > 0.5);
+
+    const problems = [];
+    if (bars.length !== drawable.length)
+      problems.push(`${bars.length} bars drawn for ${drawable.length} non-zero buckets`);
+    for (const b of bars) {
+      if (b.sign === "pos" && b.x < CX + GUTTER - 0.01)
+        problems.push(`positive bar starts at ${b.x}, left of the axis gutter`);
+      if (b.sign === "neg" && b.x + b.w > CX - GUTTER + 0.01)
+        problems.push(`negative bar ends at ${(b.x + b.w).toFixed(1)}, right of the axis gutter`);
+      if (b.w > HALF + 0.01)
+        problems.push(`bar width ${b.w.toFixed(1)} exceeds the ${HALF} half-width`);
+    }
+    const posCount = bars.filter((b) => b.sign === "pos").length;
+    const negCount = bars.filter((b) => b.sign === "neg").length;
+    const expectPos = drawable.filter((v) => v >= 0).length;
+    if (posCount !== expectPos)
+      problems.push(`${posCount} green bars for ${expectPos} positive buckets`);
+    // Strike labels must survive: they are the price ladder.
+    const labels = (svg.match(/class="gex-strike"/g) || []).length;
+    if (labels !== (spy.chart || []).length)
+      problems.push(`${labels} strike labels for ${(spy.chart || []).length} buckets`);
+
+    if (problems.length) {
+      failures++;
+      problems.forEach((p) => console.log(`  FAIL  ${p}`));
+    } else {
+      console.log(`  ok    ${posCount} green / ${negCount} red bars, each on the ` +
+        `correct side of the axis, ${labels} strike labels`);
+      const marks = ["gex-spot", "gex-zero", "gex-wall", "gex-magnet"]
+        .filter((c) => svg.includes(`class="${c}`) || svg.includes(`class="${c} `));
+      console.log(`  ok    overlays present: ${marks.join(", ") || "none"}`);
+    }
+  }
 
   // Geometry of the combined auction chart: candles must stay in the left
   // region and profile bars in the right one, or they overlap into mush. This
@@ -156,9 +211,10 @@ function check(name, html) {
     ["regime", api.renderRegime, P("regime")],
     ["calendar", api.renderCalendar, P("calendar")],
     ["gamma_spx", (b, p) => api.renderGamma(b, p, true), P("gamma_spx")],
-    ["gamma_spy", (b, p) => api.renderGamma(b, p, false), P("gamma_spy")],
+    ["gamma_spy", api.renderSpyPositioning, P("gamma_spy")],
     ["vix_structure", api.renderVix, P("vix_structure")],
     ["correlation", api.renderCorrelation, P("correlation")],
+    ["cftc_positioning", api.renderCftcPositioning, P("cftc_positioning")],
     ["volume_profile", api.renderProfile, P("volume_profile")],
   ];
   for (const [name, fn, payload] of panels) {
