@@ -44,6 +44,17 @@ PANEL_KEYS = [
     "t2_news",
     "t2_events",
     "t2_sentiment",
+    # Tab 3 — news screener. One key per topic panel; unlike the t2_* keys these
+    # have a fixed subject, so a cached payload never belongs to "something
+    # else" and stale data is always safe to keep on screen.
+    "t3_us_macro",
+    "t3_us_equities",
+    "t3_us_rates",
+    "t3_eu_macro",
+    "t3_eu_markets",
+    "t3_energy",
+    "t3_precious",
+    "t3_metals",
 ]
 
 _lock = threading.Lock()

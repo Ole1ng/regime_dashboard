@@ -7,11 +7,12 @@ each renderer against a running server.
     python app.py                                   # in another shell
     python tools/check_contract.py                  # Tab 1 (default)
     python tools/check_contract.py --panels tab2    # after analysing a ticker
+    python tools/check_contract.py --panels tab3    # after a screener refresh
     python tools/check_contract.py --panels all
 
-Tab 2 is opt-in because its panels hold no payload until a ticker has been
-analysed; requiring them by default would fail the Tab 1 check on a fresh
-database.
+Tabs 2 and 3 are opt-in because their panels hold no payload until they have
+been refreshed at least once; requiring them by default would fail the Tab 1
+check on a fresh database.
 
 Exits non-zero if anything is missing.
 """
@@ -189,13 +190,56 @@ REQUIRED_TAB2 = {
     ],
 }
 
+# Tab 3 shares one renderer across all eight panels, so one field list covers
+# them all — and a break in any single panel's payload is a break in every
+# panel's rendering.
+_TAB3_PATHS = [
+    "panel", "title", "count", "empty", "window_hours", "newest",
+    "tone", "mean", "caveat", "undated_dropped",
+    "sentiment.tone", "sentiment.mean", "sentiment.n",
+    "sentiment.pos", "sentiment.neg", "sentiment.neu",
+    "sentiment.pos_pct", "sentiment.neg_pct", "sentiment.neu_pct",
+    # The directional layer. `score` is legitimately None when no headline
+    # fired a rule, but the key itself must always be present — the renderer
+    # branches on it.
+    "asset.score", "asset.label", "asset.noun", "asset.coverage",
+    "asset.n_fired", "asset.n", "asset.thin", "asset.two_sided",
+    "asset.bull", "asset.bear",
+    "themes[].term", "themes[].count",
+    "drivers[].driver", "drivers[].count",
+    "salient[].title", "salient[].link", "salient[].source",
+    "salient[].score", "salient[].asset", "salient[].drivers",
+    "source_breakdown[].source", "source_breakdown[].mean",
+    "source_breakdown[].n",
+    "feeds[].feed", "feeds[].n",
+    "quotes[].label", "quotes[].display", "quotes[].delta", "quotes[].dir",
+    "items[].title", "items[].link", "items[].source", "items[].published",
+    "items[].compound", "items[].asset",
+    "commentary.headline", "commentary.sentences", "commentary.warnings",
+]
+
+REQUIRED_TAB3 = {
+    "t3_us_macro": _TAB3_PATHS,
+    "t3_us_equities": _TAB3_PATHS,
+    "t3_us_rates": _TAB3_PATHS,
+    "t3_eu_macro": _TAB3_PATHS,
+    "t3_eu_markets": _TAB3_PATHS,
+    "t3_energy": _TAB3_PATHS,
+    "t3_precious": _TAB3_PATHS,
+    "t3_metals": _TAB3_PATHS,
+}
+
 # Paths that are allowed to be absent because the list they live in may be
 # legitimately empty on a given day.
 OPTIONAL_IF_EMPTY = {"naked_pocs", "lvn_zones", "oi_magnets", "confluence",
                      "destabilisers",
                      # Tab 2: all legitimately empty for some tickers.
                      "divergences", "themes", "salient", "source_breakdown",
-                     "feeds", "term", "top_terms", "top", "chart", "moves"}
+                     "feeds", "term", "top_terms", "top", "chart", "moves",
+                     # Tab 3: a quiet weekend empties a niche panel, no driver
+                     # rule need fire, and the quote strip is optional by
+                     # design — none of these is a contract break.
+                     "drivers", "quotes", "items"}
 
 
 def resolve(obj, path: str):
@@ -225,8 +269,8 @@ def main() -> int:
     if "--panels" in args:
         i = args.index("--panels")
         which = args[i + 1] if i + 1 < len(args) else ""
-    if which not in ("tab1", "tab2", "all"):
-        print(f"unknown --panels {which!r}; choose tab1, tab2 or all")
+    if which not in ("tab1", "tab2", "tab3", "all"):
+        print(f"unknown --panels {which!r}; choose tab1, tab2, tab3 or all")
         return 2
 
     required = {}
@@ -234,6 +278,8 @@ def main() -> int:
         required.update(REQUIRED)
     if which in ("tab2", "all"):
         required.update(REQUIRED_TAB2)
+    if which in ("tab3", "all"):
+        required.update(REQUIRED_TAB3)
 
     with urllib.request.urlopen(URL, timeout=30) as r:
         state = json.load(r)

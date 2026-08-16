@@ -2,6 +2,7 @@
 
     python tools/smoke.py [panel ...]        # Tab 1, fixed subject
     python tools/smoke.py t2 [SYMBOL ...]    # Tab 2, per ticker
+    python tools/smoke.py t3                 # Tab 3, news screener
 
 Tab 1 panels: vix, correlation, profile, calendar, gamma, spy, cftc, regime.
 No arguments runs all of them.
@@ -245,6 +246,50 @@ def run_t2(symbol: str = "NVDA") -> None:
         print("    (none)")
 
 
+# --------------------------------------------------------------------------- #
+# Tab 3 — news screener
+# --------------------------------------------------------------------------- #
+
+def run_t3() -> None:
+    """Run the whole screener and print each panel's two readings."""
+    import time
+
+    from panels import news_screener as ns
+
+    print(f"\n{'#' * 70}\n# TAB 3 — NEWS SCREENER\n{'#' * 70}")
+    started = time.time()
+    panels = ns.refresh()
+    print(f"  fetched in {time.time() - started:.1f}s")
+
+    errors = next(iter(panels.values()))["errors"]
+    print(f"  feed errors: {len(errors)}")
+    for e in errors[:8]:
+        print(f"    - {e}")
+
+    print(f"\n  {'panel':<32} {'n':>3}  {'tone':>7}  {'asset':>7}  "
+          f"{'cov':>5}  verdict")
+    for payload in panels.values():
+        asset = payload["asset"]
+        score = "    —" if asset["score"] is None else f"{asset['score']:+.2f}"
+        print(f"  {payload['title']:<32} {payload['count']:>3}  "
+              f"{payload['mean']:+.3f}  {score:>7}  "
+              f"{asset['coverage'] * 100:>4.0f}%  {asset['label']}"
+              f"{'  [DIVERGENT]' if payload['divergence'] else ''}")
+
+    for payload in panels.values():
+        show(payload["title"].upper(), payload,
+             ["count", "window_hours", "tone", "mean", "undated_dropped"])
+        for row in payload["salient"][:4]:
+            asset = "  n/a" if row["asset"] is None else f"{row['asset']:+.2f}"
+            drivers = f"  [{', '.join(row['drivers'])}]" if row["drivers"] else ""
+            print(f"    asset {asset}  tone {row['score']:+.2f}  "
+                  f"{row['title'][:62]}{drivers}")
+        if payload["quotes"]:
+            strip = "  ".join(f"{q['label']} {q['display']} {q['delta']}"
+                              for q in payload["quotes"])
+            print(f"\n    {strip}")
+
+
 RUNNERS = {"vix": run_vix, "correlation": run_correlation, "profile": run_profile,
            "calendar": run_calendar, "gamma": run_gamma, "spy": run_spy,
            "cftc": run_cftc, "regime": run_regime}
@@ -252,6 +297,11 @@ RUNNERS = {"vix": run_vix, "correlation": run_correlation, "profile": run_profil
 # Tab 2 runners take a symbol, so they are dispatched separately from the
 # fixed-subject Tab 1 panels above.
 TICKER_RUNNERS = {"t2": run_t2}
+
+# Tab 3 takes no argument but is kept out of RUNNERS so that a bare
+# `python tools/smoke.py` stays a Tab 1 run — the screener is 40 third-party
+# requests and should be asked for explicitly.
+TAB_RUNNERS = {"t3": run_t3}
 
 if __name__ == "__main__":
     args = sys.argv[1:]
@@ -262,11 +312,15 @@ if __name__ == "__main__":
             TICKER_RUNNERS[args[0]](sym.upper())
         sys.exit(0)
 
+    if args and args[0] in TAB_RUNNERS:
+        TAB_RUNNERS[args[0]]()
+        sys.exit(0)
+
     names = args or list(RUNNERS)
     for n in names:
         if n not in RUNNERS:
             print(f"unknown panel {n!r}; choose from "
-                  f"{list(RUNNERS) + list(TICKER_RUNNERS)}")
+                  f"{list(RUNNERS) + list(TICKER_RUNNERS) + list(TAB_RUNNERS)}")
             continue
         try:
             RUNNERS[n]()

@@ -18,6 +18,16 @@ const RENDERERS = {
   t2_social: renderT2Social,
   t2_events: renderT2Events,
   t2_news: renderT2News,
+  // Tab 3 — news screener. Eight topic panels with identical structure, so
+  // they share one renderer instead of eight copies that would drift apart.
+  t3_us_macro: renderNewsPanel,
+  t3_us_equities: renderNewsPanel,
+  t3_us_rates: renderNewsPanel,
+  t3_eu_macro: renderNewsPanel,
+  t3_eu_markets: renderNewsPanel,
+  t3_energy: renderNewsPanel,
+  t3_precious: renderNewsPanel,
+  t3_metals: renderNewsPanel,
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1546,6 +1556,119 @@ function renderT2News(body, p) {
     `<div class="footnote">${esc(p.caveat || "")}</div>`;
 }
 
+// --------------------------------------------------------------------------
+// Tab 3 — news screener
+// --------------------------------------------------------------------------
+
+// Daily closes for the panel's asset, so the tone reading sits next to the tape
+// it is describing. Values arrive pre-formatted from market_context so there is
+// no per-kind formatting logic to keep in sync on this side.
+function quoteStrip(quotes) {
+  if (!quotes || !quotes.length) return "";
+  const cells = quotes.map((q) =>
+    `<div class="quote">` +
+    `<span class="quote-label">${esc(q.label)}</span>` +
+    `<span class="quote-value">${esc(q.display)}</span>` +
+    `<span class="quote-delta ${q.dir > 0 ? "pos" : q.dir < 0 ? "neg" : ""}">` +
+    `${esc(q.delta)}</span></div>`).join("");
+  return `<div class="row quote-strip">${cells}</div>`;
+}
+
+// The two readings side by side. Showing them together is the whole design:
+// either they agree, which is confirmation, or they do not, which is the
+// interesting case and gets called out explicitly.
+function assetReadBar(p) {
+  const a = p.asset || {};
+  const s = p.sentiment || {};
+  const has = a.score !== null && a.score !== undefined;
+
+  const assetCls = !has ? "" : a.score >= 0.25 ? "pos" : a.score <= -0.25 ? "neg" : "";
+  const toneCls = s.mean >= 0.05 ? "pos" : s.mean <= -0.05 ? "neg" : "";
+
+  const coverage = has
+    ? `${a.n_fired}/${a.n} headlines (${Math.round((a.coverage || 0) * 100)}%)`
+    : "no headline carried a direction";
+
+  return `<div class="row read-pair${p.divergence ? " divergent" : ""}">` +
+    `<div class="read">` +
+      `<div class="read-label">Asset read</div>` +
+      `<div class="read-value ${assetCls}">${has ? esc(a.label) : "—"}</div>` +
+      `<div class="read-sub">${has ? (a.score >= 0 ? "+" : "") +
+        a.score.toFixed(2) + " · " : ""}${esc(coverage)}` +
+        `${has && a.thin ? ` <span class="thin-flag">thin</span>` : ""}</div>` +
+    `</div>` +
+    `<div class="read">` +
+      `<div class="read-label">Tone</div>` +
+      `<div class="read-value ${toneCls}">${esc(s.tone || "—")}</div>` +
+      `<div class="read-sub">${(s.mean >= 0 ? "+" : "")}${(s.mean || 0).toFixed(3)}` +
+        ` · ${s.n || 0} headlines</div>` +
+    `</div>` +
+    (p.divergence
+      ? `<div class="read read-diverge">` +
+        `<div class="read-label">Divergence</div>` +
+        `<div class="read-value warn-text">${esc(p.divergence.severity)}</div>` +
+        `<div class="read-sub">gap ${p.divergence.gap.toFixed(2)}</div></div>`
+      : "") +
+    `</div>`;
+}
+
+function renderNewsPanel(body, p) {
+  if (!p) {
+    body.innerHTML = `<p class="empty-note">No data yet — press ` +
+      `<strong>Refresh</strong> to build the screener.</p>`;
+    return;
+  }
+  if (p.empty) {
+    body.innerHTML = quoteStrip(p.quotes) + commentaryBlock(p.commentary);
+    return;
+  }
+
+  const bar = bullBearBar(p.sentiment.pos, p.sentiment.neg, p.sentiment.neu,
+                          ["positive", "negative", "neutral"]);
+
+  const drivers = (p.drivers || []).map((d) =>
+    `<span class="chip">${esc(d.driver)} ${d.count}</span>`).join("");
+
+  const themes = (p.themes || []).slice(0, 8).map((t) =>
+    `<span class="chip">${esc(t.term)} ${t.count}</span>`).join("");
+
+  // Asset read leads the table: on this tab the question is what the headline
+  // says about the asset, and tone is the supporting column.
+  const rows = (p.salient || []).map((h) => {
+    const a = h.asset;
+    const aCls = a == null ? "" : a > 0 ? "pos" : a < 0 ? "neg" : "";
+    const aTxt = a == null ? "—" : `${a >= 0 ? "+" : ""}${a.toFixed(2)}`;
+    return `<tr>` +
+      `<td class="${aCls}">${aTxt}</td>` +
+      `<td class="${h.score >= 0 ? "pos" : "neg"}">${h.score.toFixed(2)}</td>` +
+      `<td>${h.link
+        ? `<a href="${esc(h.link)}" target="_blank" rel="noopener">${esc(h.title)}</a>`
+        : esc(h.title)}` +
+        `${(h.drivers || []).length
+          ? ` <span class="driver-tag">${esc(h.drivers.join(", "))}</span>` : ""}</td>` +
+      `<td class="news-src">${esc(h.source)}</td></tr>`;
+  }).join("");
+
+  const sources = (p.source_breakdown || []).slice(0, 6).map((r) =>
+    `<span class="chip ${r.mean >= 0.05 ? "pos" : r.mean <= -0.05 ? "neg" : ""}">` +
+    `${esc(r.source)} ${r.mean >= 0 ? "+" : ""}${r.mean.toFixed(2)} (${r.n})</span>`)
+    .join("");
+
+  body.innerHTML =
+    quoteStrip(p.quotes) +
+    assetReadBar(p) +
+    commentaryBlock(p.commentary) +
+    (bar ? `<div class="row">${bar}</div>` : "") +
+    (drivers ? `<div class="row chips">${drivers}</div>` : "") +
+    (themes ? `<div class="row chips">${themes}</div>` : "") +
+    (sources ? `<div class="row chips">${sources}</div>` : "") +
+    (rows ? `<div class="row tbl-wrap"><table class="data"><thead><tr>` +
+      `<th>Asset</th><th>Tone</th><th>Most directional headlines</th>` +
+      `<th>Source</th></tr></thead><tbody>${rows}</tbody></table></div>` : "") +
+    `<div class="footnote">${p.count} headlines, last ${p.window_hours}h` +
+    `${p.newest ? ` · newest ${esc(relTime(p.newest))}` : ""}.</div>`;
+}
+
 function setStatus(msg) { $("#status-line").textContent = msg; }
 
 function showTab(id) {
@@ -1615,6 +1738,10 @@ async function init() {
   symInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") runTab2($("#btn-tab2"));
   });
+
+  $("#btn-tab3").addEventListener("click", (e) =>
+    runRefresh("/api/refresh/tab3", e.currentTarget, "Refreshing news screener",
+               "~40 feeds in parallel, this takes about 20 seconds"));
 
   setStatus("Loading last session…");
   try {

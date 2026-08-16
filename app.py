@@ -30,6 +30,7 @@ from panels import regime, spy_positioning, vix_structure, volume_profile
 from panels import (_finviz, ticker_events, ticker_news, ticker_positioning,
                     ticker_sentiment, ticker_social, ticker_squeeze,
                     vol_sentiment)
+from panels import _feeds, news_screener
 
 BASE = Path(__file__).parent
 STATIC = BASE / "static"
@@ -50,6 +51,11 @@ _TAB2_LOCK = threading.Lock()
 # Panel keys refreshed by the Tab 2 endpoint, in render order.
 _TAB2_KEYS = ("t2_positioning", "t2_vol", "t2_squeeze", "t2_social",
               "t2_news", "t2_events", "t2_sentiment")
+
+# Tab 3's eight panels all come out of a single fetch, so a second concurrent
+# press would duplicate ~40 third-party requests for no benefit.
+_TAB3_LOCK = threading.Lock()
+_TAB3_KEYS = _feeds.PANEL_KEYS
 
 
 @asynccontextmanager
@@ -324,6 +330,48 @@ def _save_t2_snapshot(sym: str, out: dict) -> None:
             store.save_snapshot(sym, snapshot)
         except Exception:
             pass  # history is a nice-to-have; never fail a refresh over it
+
+
+# --------------------------------------------------------------------------- #
+# Tab 3 — news screener
+# --------------------------------------------------------------------------- #
+
+@app.post("/api/refresh/tab3")
+def api_refresh_tab3() -> JSONResponse:
+    """Refresh all eight news panels from one fetch.
+
+    Unlike Tabs 1 and 2 there is nothing to sequence: ``news_screener.refresh()``
+    makes every request in parallel internally and returns all eight payloads
+    together, because they are eight views of one shared pool of headlines
+    rather than eight independent panels.
+
+    Failure handling follows Tab 1's ``_run``, not Tab 2's ``_run_t2``: each
+    panel's subject is fixed, so yesterday's US Macro headlines are still US
+    Macro headlines and a stale payload behind an error badge is the right thing
+    to show. Tab 2's symbol guard exists only because its subject changes on
+    every press.
+    """
+    if not _TAB3_LOCK.acquire(blocking=False):
+        return JSONResponse(
+            {"detail": "A Tab 3 refresh is already running."}, status_code=409)
+
+    out: dict = {}
+    try:
+        try:
+            payloads = news_screener.refresh()
+        except Exception as exc:
+            # A total fetch failure (no network) must not blank eight panels.
+            message = f"{type(exc).__name__}: {exc}"
+            for key in _TAB3_KEYS:
+                store.update_status(key, "error", message)
+                out[key] = store.get_panel(key)
+            return JSONResponse(out)
+
+        for key in _TAB3_KEYS:
+            _run(out, key, lambda k=key: payloads[k])
+        return JSONResponse(out)
+    finally:
+        _TAB3_LOCK.release()
 
 
 if __name__ == "__main__":

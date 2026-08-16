@@ -223,6 +223,135 @@ is ~1 MB and changes weekly, so it is cached in the `kv` table with a 7-day TTL.
 
 ---
 
+# Tab 3 — news screener sources
+
+**Verification date: 2026-08-16**, via `tools/probe_news.py`. All key-free. One
+**Refresh** press makes ~38 requests across 12 workers and lands in ~15 seconds,
+yielding ~900 headlines inside the 48-hour window.
+
+Re-run `python tools/probe_news.py` before touching anything here. It reports
+entry count, count inside the window, **newest** age and median age per feed —
+and the newest/median split is what separates a quiet primary source from a
+frozen archive (see §12c).
+
+## 12. Google News — two query shapes that behave completely differently ✅
+
+### 12a. ⚠ `when:` is NOT honoured on a keyword query
+
+The single most important finding for this tab. A topic query returns 100
+entries ranked by **all-time relevance**, treating the date operator as a hint:
+
+| Panel query (with `when:2d`) | Entries | Median age | Oldest |
+|---|---|---|---|
+| US Fixed Income | 100 | **2,226 h** (~3 months) | 98,196 h (~11 years) |
+| Europe Macro | 100 | 2,058 h | — |
+| Europe Equities | 100 | 166 h | 155,555 h (~18 years) |
+| Precious Metals | 100 | 50 h | 258 h |
+
+The operator is kept in the query because it still biases relevance towards
+recent, but **nothing may depend on it**. `news_screener` applies a hard
+timestamp window locally, and that is the only actual guarantee of recency.
+
+### 12b. A bare `site:` query IS honoured — and is the only route to Reuters and Bloomberg
+
+Drop the keywords and Google returns a recency-ordered stream:
+
+| Wire query | Entries | Inside 24 h | Newest | Median |
+|---|---|---|---|---|
+| `site:bloomberg.com when:1d` | 100 | 98 | 0 h | 9 h |
+| `site:reuters.com when:1d` | 98 | 98 | 1 h | 13 h |
+| `site:marketwatch.com when:1d` | 100 | 89 | 3 h | 20 h |
+| `site:wsj.com when:1d` | 100 | 77 | 0 h | 14 h |
+| `site:ft.com when:1d` | 100 | 72 | 2 h | 21 h |
+| `site:cnbc.com when:1d` | 61 | 38 | 3 h | 15 h |
+
+This asymmetry is why `_feeds.py` has both `PANEL_QUERIES` (topic-scoped, panel
+labelled) and `WIRE_SITES` (publisher-scoped, classifier-routed). **Reuters and
+Bloomberg have no working public feed at all**, so these queries are the only
+way to cover either.
+
+Google labels the same publisher inconsistently between the two query shapes
+("Bloomberg.com" vs "Bloomberg"), which splits one publisher into two rows in
+the per-source breakdown — hence `_feeds.canonical_source()`.
+
+## 12c. ⚠ Frozen feeds — HTTP 200, valid XML, year-old content
+
+The nastiest failure mode here, and the reason `probe_news.py` reports *newest*
+age and not just entry count. These four all return 200, parse cleanly, and lead
+with plausible market headlines that read as current:
+
+| Feed | Entries | Median age | Verdict |
+|---|---|---|---|
+| `feeds.a.dj.com/rss/RSSMarketsMain.xml` | 20 | **13,575 h** (~1.5 y) | removed |
+| `feeds.a.dj.com/rss/WSJcomUSBusiness.xml` | 20 | 13,642 h | removed |
+| `feeds.marketwatch.com/marketwatch/realtimeheadlines/` | 10 | **15,161 h** (~1.7 y) | removed |
+| `feeds.marketwatch.com/marketwatch/marketpulse/` | 30 | 15,738 h | removed |
+
+Its top item was "Jobless claims fall to lowest level since mid-May" — entirely
+credible, and about eighteen months old. WSJ and MarketWatch are covered by
+their §12b wire queries instead. `feeds.marketwatch.com/marketwatch/topstories/`
+is unaffected and still in use (newest 5 h).
+
+`investing.com/rss/commodities.rss` was also dropped: it carries **no timestamps
+at all**, so every item falls out of the window.
+
+## 13. Publisher feeds ✅
+
+Classifier-routed unless a fallback panel is noted.
+
+| Publisher | Feed | Notes |
+|---|---|---|
+| CNBC | `cnbc.com/id/{id}/device/rss/rss.html` | ids: `100003114` top, `20910258` economy, `10000664` finance, `19836768` energy → Oil & Energy |
+| MarketWatch | `/marketwatch/topstories/` | the only MarketWatch feed that is not frozen |
+| Financial Times | `/rss/home`, `?format=rss` on `markets`, `global-economy`, `commodities`, `world/europe` | ⚠ sections are **loosely curated** — `global-economy` led with a school-fees column. Always classifier-routed, never straight into a panel. |
+| Yahoo Finance | `/news/rssindex` | 50 entries, general market |
+| Investing.com | `/rss/news_14` economy, `news_11` commodities, `news_25` stocks, `news_1` forex/rates | 10 entries each |
+| Federal Reserve | `/feeds/press_all.xml`, `press_monetary.xml`, `speeches.xml` | → US Macro (monetary also → US Fixed Income) |
+| ECB | `/rss/press.html` | → Europe Macro |
+| Bank of England | `/rss/news` | → Europe Macro |
+| EIA | `/rss/todayinenergy.xml`, `press_rss.xml` | → Oil & Energy. Slowest of all feeds at ~10 s. |
+| OilPrice | `/rss/main` | → Oil & Energy |
+| Mining.com | `/feed/` | → Industrial Metals |
+
+The central-bank and EIA feeds are legitimately **quiet** — newest item 58–415 h
+old on the verification date (a Sunday). That is not the same as frozen: they
+publish on their own schedule and are the primary source on the days that matter.
+
+## 14. Market levels — yfinance ✅
+
+All 35 candidate symbols returned two closes. Traps:
+
+- **`^TNX` is a direct percentage** (4.696 = 4.696%), *not* the ×10 form.
+- **Yahoo has no 2-year yield.** The curve rows are 3M→10Y (`^IRX`→`^TNX`) and
+  5s30s (`^FVX`→`^TYX`), and are labelled as such — calling a 3M–10Y spread
+  "2s10s" would be quietly wrong on the number a rates reader checks first.
+- Futures and cash indices keep different holiday calendars, so a partial result
+  is normal. `period="6d"` survives a weekend plus a holiday; `2d` does not.
+- Symbols in use: `^GSPC ^NDX ^RUT ^VIX ^IRX ^FVX ^TNX ^TYX HYG DX-Y.NYB
+  EURUSD=X GBPUSD=X VGK ^STOXX50E ^GDAXI ^FTSE ^FCHI CL=F BZ=F NG=F RB=F GC=F
+  SI=F PL=F PA=F HG=F ALI=F XME`.
+
+## Tab 3 sources tried and rejected ❌
+
+Probed 2026-08-16. Do not reintroduce without re-probing.
+
+| Source | Why not |
+|---|---|
+| `feeds.reuters.com/reuters/businessNews` | ConnectionError — Reuters retired its feeds. Use the §12b wire query. |
+| `reutersagency.com/feed/` | HTTP 404 |
+| `bls.gov/feed/news_release.rss`, `/feed/bls_latest.rss` | HTTP 403 to any user agent, browser UA included |
+| `home.treasury.gov/rss/press.xml` | HTTP 404 |
+| Kitco (`/rss/`, `/rss/KitcoNews.xml`) | HTTP 404 on every path tried |
+| `opec.org/opec_web/en/press_room/rss.xml` | HTTP 403 |
+| `miningweekly.com/page/rss` | HTTP 404 |
+| Eurostat euroindicators RSS | HTTP 404 |
+| `spglobal.com/commodityinsights/.../latest-news` | HTTP 403 |
+| WSJ + MarketWatch realtime/marketpulse feeds | Frozen ~1.5 years — see §12c |
+| `investing.com/rss/commodities.rss` | No timestamps on any entry |
+| EU Commission presscorner RSS | Returns "Daily News DD/MM/YYYY" digests; titles carry no content to classify or score |
+
+---
+
 ## Sources deliberately not used
 
 - Any paid or authenticated feed (ORATS, Polygon, Theta Data, SpotGamma, CBOE DataShop).

@@ -23,6 +23,50 @@ def test_news_and_social_analyzers_are_distinct_objects():
     assert su.NEWS.lexicon is not su.SOCIAL.lexicon
 
 
+def test_all_three_analyzers_are_distinct_objects():
+    analyzers = [su.NEWS, su.SOCIAL, su.MACRO]
+    assert len({id(a) for a in analyzers}) == 3
+    assert len({id(a.lexicon) for a in analyzers}) == 3
+
+
+def test_macro_vocabulary_does_not_leak_into_the_other_analyzers():
+    # "hawkish" and "stagflation" are not words a single-stock headline or a
+    # WSB post uses, and neutralising "crude" would be actively wrong for a
+    # stock corpus where the word keeps its ordinary English meaning.
+    for word in ("hawkish", "dovish", "stagflation", "disinflation"):
+        assert word in su.MACRO.lexicon
+        assert word not in su.NEWS.lexicon, f"{word} leaked into NEWS"
+        assert word not in su.SOCIAL.lexicon, f"{word} leaked into SOCIAL"
+
+
+def test_macro_neutralises_the_subject_nouns_that_carry_a_spurious_sign():
+    """These words name the subject of a macro headline, not a judgement.
+
+    Each carries a valence in stock VADER earned in ordinary English, and on a
+    macro corpus the subject appears in nearly every headline — so the sign is
+    a systematic bias per panel rather than noise. "crude" at -2.7 alone makes
+    every oil headline read bearish.
+    """
+    import vaderSentiment.vaderSentiment as vader
+    plain = vader.SentimentIntensityAnalyzer().lexicon
+
+    for word in ("crude", "credit", "treasury", "treasuries", "energy"):
+        assert plain.get(word, 0) != 0, (
+            f"{word!r} no longer carries a stray valence in the shipped VADER "
+            f"lexicon — this neutralisation may no longer be needed")
+        assert su.MACRO.lexicon[word] == 0.0
+        # NEWS keeps the original value: on a stock corpus it is not wrong.
+        assert su.NEWS.lexicon.get(word) == plain.get(word)
+
+
+def test_macro_reads_policy_language_the_other_analyzers_miss():
+    for text, direction in [("Fed officials strike a hawkish tone", -1),
+                            ("Officials signal a dovish pivot", 1),
+                            ("Stagflation fears mount", -1),
+                            ("Oil glut deepens as output climbs", -1)]:
+        assert su.score(text, su.MACRO) * direction > 0.15, text
+
+
 def test_wsb_slang_does_not_leak_into_news_scoring():
     # "moon" and "tendies" are meaningless to a news reader and must stay at
     # zero there, while scoring on the social analyzer.

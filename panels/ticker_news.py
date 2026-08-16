@@ -21,36 +21,25 @@ one about a short-seller report can both read positive to a bag-of-words model.
 
 from __future__ import annotations
 
-import re
-import socket
 import urllib.parse as urlparse
-from datetime import datetime, timezone
 
-import feedparser
-import requests
-
+from . import _feeds
 from . import _sentiment_util as senti
 
-GOOGLE_NEWS_TMPL = (
-    "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
-)
+GOOGLE_NEWS_TMPL = _feeds.GOOGLE_NEWS_TMPL
 SEEKING_ALPHA_TMPL = "https://seekingalpha.com/api/sa/combined/{sym}.xml"
 
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-    )
-}
-
 MAX_ITEMS = 40
-FEED_TIMEOUT = 15.0
+FEED_TIMEOUT = _feeds.FEED_TIMEOUT
 LOOKBACK = "when:7d"
 
-# Google News appends " - Publisher" to every title. Left in, the publisher
-# names dominate the theme list and pollute the sentiment corpus.
-_GOOGLE_SUFFIX_RE = re.compile(r"\s+-\s+[^-]{2,40}$")
-_NORM_RE = re.compile(r"[^a-z0-9 ]+")
+# The generic RSS plumbing lives in _feeds so Tab 2 and the Tab 3 screener share
+# one implementation. Kept under the old private names: they are this module's
+# vocabulary and every call site below reads better for it.
+_parse_feed = _feeds.parse_feed
+_entry_time = _feeds.entry_time
+_google_source = _feeds.google_source
+_dedupe = _feeds.dedupe
 
 CAVEAT = ("Extractive analysis — the frequency and tone of headlines, not an "
           "interpretation of what they mean for the equity.")
@@ -84,13 +73,6 @@ def refresh(symbol: str, company: str | None = None,
 # Feeds
 # --------------------------------------------------------------------------- #
 
-def _parse_feed(url: str) -> list:
-    """feedparser via requests, so the browser UA and timeout actually apply."""
-    resp = requests.get(url, headers=_HEADERS, timeout=FEED_TIMEOUT)
-    resp.raise_for_status()
-    return feedparser.parse(resp.content).entries
-
-
 def _google_news(symbol: str, company: str | None) -> list[dict]:
     """Query on the company name where known — see the module docstring."""
     if company:
@@ -101,7 +83,7 @@ def _google_news(symbol: str, company: str | None) -> list[dict]:
 
     out = []
     for entry in _parse_feed(url):
-        title = _GOOGLE_SUFFIX_RE.sub("", entry.get("title", "")).strip()
+        title = _feeds.strip_google_suffix(entry.get("title", ""))
         if not title:
             continue
         out.append({
@@ -112,15 +94,6 @@ def _google_news(symbol: str, company: str | None) -> list[dict]:
             "feed": "Google News",
         })
     return out
-
-
-def _google_source(entry) -> str:
-    src = entry.get("source")
-    if isinstance(src, dict) and src.get("title"):
-        return src["title"]
-    # Fall back to the publisher Google appended to the title.
-    match = re.search(r"\s+-\s+([^-]{2,40})$", entry.get("title", ""))
-    return match.group(1).strip() if match else "Google News"
 
 
 def _seeking_alpha(symbol: str) -> list[dict]:
@@ -143,16 +116,6 @@ def _normalise_finviz(rows: list[dict]) -> list[dict]:
     return [{"title": r["title"], "link": r["link"], "source": r.get("source") or "Finviz",
              "published": r.get("published"), "feed": "Finviz"}
             for r in rows if r.get("title")]
-
-
-def _entry_time(entry) -> float | None:
-    parsed = entry.get("published_parsed") or entry.get("updated_parsed")
-    if not parsed:
-        return None
-    try:
-        return datetime(*parsed[:6], tzinfo=timezone.utc).timestamp()
-    except (TypeError, ValueError):
-        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -193,33 +156,6 @@ def compute(items: list[dict], symbol: str, company: str | None = None,
     }
     payload["commentary"] = _commentary(payload)
     return payload
-
-
-def _dedupe(items: list[dict]) -> list[dict]:
-    """Drop repeats by link and by normalised title.
-
-    The same wire story reaches all three feeds under slightly different titles
-    and always under different URLs, so link-only dedup leaves obvious
-    duplicates in the corpus and skews the sentiment mean.
-    """
-    seen_links: set[str] = set()
-    seen_titles: set[str] = set()
-    out = []
-
-    for item in items:
-        link = (item.get("link") or "").split("?")[0]
-        title_key = _NORM_RE.sub("", (item.get("title") or "").lower()).strip()
-        title_key = " ".join(title_key.split())
-        if not title_key:
-            continue
-        if (link and link in seen_links) or title_key in seen_titles:
-            continue
-        if link:
-            seen_links.add(link)
-        seen_titles.add(title_key)
-        out.append(item)
-
-    return out
 
 
 def _feed_counts(items: list[dict]) -> list[dict]:

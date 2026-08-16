@@ -1,15 +1,18 @@
-"""Deterministic, offline text scoring shared by the Tab 2 news and social panels.
+"""Deterministic, offline text scoring shared by the Tab 2 and Tab 3 panels.
 
 No LLM and no network. Ported from ``market_almanack/analysis.py`` (VADER +
 CountVectorizer themes + salience ranking) and extended in two ways this project
 needs:
 
-  * **Two tuned analyzers instead of one.** Stock headlines and retail chatter
-    speak different languages. ``NEWS`` adds a finance lexicon so "beats",
-    "downgrade" and "dilution" carry the weight they actually have in a
+  * **Three tuned analyzers instead of one.** Stock headlines, retail chatter and
+    macro wires speak different languages. ``NEWS`` adds a finance lexicon so
+    "beats", "downgrade" and "dilution" carry the weight they actually have in a
     headline; ``SOCIAL`` adds the WSB slang lexicon lifted from
     ``wsb_scraper/sentiment/keywords.py`` so "moon", "tendies" and "bagholder"
-    score at all. Out of the box VADER reads every one of those as neutral.
+    score at all; ``MACRO`` adds policy and commodity vocabulary so "hawkish",
+    "stagflation" and "glut" register, and neutralises the subject nouns
+    ("yield", "spreads", "claims") that carry a spurious sign. Out of the box
+    VADER reads every one of those wrongly or not at all.
 
   * **Per-ticker stopwords.** For a single-name corpus the ticker and company
     name appear in nearly every headline, so left in they dominate the theme
@@ -112,6 +115,62 @@ FINANCE_LEXICON = {
     "bullish": 2.0, "oversold": 1.0, "overbought": -1.0,
 }
 
+# Macro and policy vocabulary, for the Tab 3 news screener. Stock VADER scores
+# every one of these at zero: "hawkish", "dovish" and "stagflation" are not
+# words it has ever seen, and they are the entire content of a policy headline.
+#
+# These valences are the *tone* of the word in a macro headline, which is not
+# the same as its direction for any particular asset — "hawkish" reads negative
+# here because tightening is restrictive, but it is bullish the dollar and
+# bearish bonds at the same time. That per-asset direction is ``_asset_read``'s
+# job, not this lexicon's.
+MACRO_LEXICON = {
+    # Policy stance
+    "hawkish": -1.8, "dovish": 1.8, "tightening": -1.5, "tighten": -1.5,
+    "easing": 1.5, "ease": 1.0, "accommodative": 1.5, "restrictive": -1.5,
+    "tapering": -1.2, "taper": -1.2, "pivot": 1.0,
+    "hike": -1.5, "hikes": -1.5, "liftoff": -1.2,
+    # Growth and inflation
+    "stagflation": -3.0, "recession": -3.0, "recessionary": -2.5,
+    "contraction": -2.0, "contracting": -2.0, "slowdown": -1.8,
+    "downturn": -2.0, "expansion": 1.5, "rebound": 1.8, "resilient": 1.5,
+    "goldilocks": 2.0, "overheating": -1.5, "deflation": -2.0,
+    "disinflation": 1.2, "reflation": 0.8, "sticky": -1.5,
+    "cooling": 0.8, "cools": 1.0, "cooled": 1.0, "cooler": 1.0,
+    "hotter": -1.2, "softening": -0.5,
+    # Labour
+    "unemployment": -1.0, "hiring": 1.2, "furlough": -1.5,
+    "redundancies": -1.5, "jobless": -1.0,
+    # Fiscal, trade and politics
+    "tariff": -1.5, "tariffs": -1.5, "sanctions": -1.5, "embargo": -1.8,
+    "shutdown": -2.0, "stimulus": 1.5, "austerity": -1.5,
+    "deficit": -1.0, "gridlock": -1.2, "escalation": -1.8, "truce": 1.5,
+    "ceasefire": 1.5,
+    # Rates and credit vocabulary
+    "widening": -1.2, "widen": -1.2, "narrowing": 1.0,
+    "inversion": -1.8, "inverted": -1.8, "haven": 0.5,
+    # Commodity vocabulary
+    "glut": -2.0, "oversupply": -1.8, "shortage": -1.0, "outage": -1.0,
+    "drawdown": 0.5, "curtailment": -1.0, "disruption": -1.5,
+    "blockade": -1.8, "surplus": -1.0,
+    # Neutral by fiat. Each of these names the *subject* of a macro headline
+    # rather than passing judgement on it, yet each carries a valence in stock
+    # VADER earned in ordinary English — and on this corpus the subject appears
+    # in nearly every headline, so the spurious sign is not noise, it is a
+    # systematic bias in one direction per panel.
+    #
+    # The worst offenders, measured against the shipped VADER lexicon:
+    #   crude       -2.7  ("crude behaviour") -> every oil headline reads bearish
+    #   credit      +1.6  ("credit to her")   -> every credit headline bullish
+    #   treasuries  +0.9  ("a treasury of")   -> every rates headline bullish
+    #   energy      +1.1  ("full of energy")
+    "crude": 0.0, "credit": 0.0, "treasury": 0.0, "treasuries": 0.0,
+    "energy": 0.0, "demand": 0.0, "loose": 0.0, "share": 0.0, "shares": 0.0,
+    "yield": 0.0, "yields": 0.0, "spread": 0.0, "spreads": 0.0,
+    "claims": 0.0, "payrolls": 0.0, "inventories": 0.0, "stockpiles": 0.0,
+    "steepening": 0.0, "pause": 0.0, "guidance": 0.0,
+}
+
 # WSB slang, lifted from wsb_scraper/sentiment/keywords.py. Retail chatter is
 # unreadable without it — VADER scores "moon", "tendies" and "bagholder" at 0.
 WSB_LEXICON = {
@@ -138,6 +197,10 @@ def _analyzer(*lexicons: dict) -> SentimentIntensityAnalyzer:
 
 NEWS = _analyzer(FINANCE_LEXICON)
 SOCIAL = _analyzer(FINANCE_LEXICON, WSB_LEXICON)
+# Order matters: MACRO_LEXICON is applied last so its neutral-by-fiat entries
+# ("yield", "spreads", "claims") override the valences FINANCE_LEXICON and
+# stock VADER give the same words.
+MACRO = _analyzer(FINANCE_LEXICON, MACRO_LEXICON)
 
 _TICKER_RE = re.compile(r"\$[A-Z]{1,5}\b")
 _URL_RE = re.compile(r"https?://\S+")

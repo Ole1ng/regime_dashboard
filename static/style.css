@@ -582,3 +582,66 @@ table.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .chip.filing-comp,
 .chip.filing-event,
 .chip.filing-other     { border-color: var(--border-lt); color: var(--fg-dim); }
+
+/* ---- Tab 3 — news screener ------------------------------------------- */
+
+/* Daily closes for the panel's asset. Auto-fit rather than a fixed column
+   count: panels carry three to seven rows and the strip must not wrap to a
+   ragged second line at the half-width panel size. */
+.quote-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-lt); border-radius: 5px;
+  background: #100c05;
+}
+.quote { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.quote-label {
+  font-size: 10px; color: var(--fg-dim); text-transform: uppercase;
+  letter-spacing: .5px; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis;
+}
+.quote-value { font-size: 14px; color: var(--fg); font-weight: 700; }
+.quote-delta { font-size: 11px; color: var(--fg-dim); }
+.quote-delta.pos { color: var(--up); }
+.quote-delta.neg { color: var(--down); }
+
+/* The two readings side by side — the panel's central claim. */
+.read-pair {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  border: 1px solid var(--border-lt); border-radius: 5px;
+  background: #110d06; padding: 10px 12px;
+}
+/* A divergence is the finding, not a warning: amber edge, no red. */
+.read-pair.divergent {
+  border-color: var(--accent-dk);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.read { min-width: 0; }
+.read-label {
+  font-size: 10px; color: var(--fg-dim); text-transform: uppercase;
+  letter-spacing: .6px;
+}
+.read-value { font-size: 15px; font-weight: 700; color: var(--fg); }
+.read-value.pos { color: var(--up); }
+.read-value.neg { color: var(--down); }
+.read-value.warn-text { color: var(--amber); text-transform: uppercase; }
+.read-sub { font-size: 11px; color: var(--fg-dim); }
+
+/* Coverage is the honest limit of the directional read, so it is called out
+   rather than left for the reader to compute from n_fired/n. */
+.thin-flag {
+  color: var(--amber); border: 1px solid #5a4420; border-radius: 8px;
+  padding: 0 5px; font-size: 10px;
+}
+
+/* Which rule fired, inline after the headline it fired on. */
+.driver-tag { color: var(--accent); font-size: 10.5px; }
+
+/* Headlines are the one place on this tab where wrapping beats truncation —
+   table.data sets nowrap globally, which would hide most of every title. */
+#panel-tab3 table.data td:nth-child(3) {
+  white-space: normal; min-width: 260px;
+}

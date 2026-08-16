@@ -1,6 +1,6 @@
 # Regime Dashboard
 
-A local, offline-first dashboard in two parts:
+A local, offline-first dashboard in three parts:
 
 - **Tab 1 — SPX REGIME** combines dealer gamma positioning, delta decay, VIX
   term structure, auction structure, implied correlation and the expiration
@@ -9,8 +9,11 @@ A local, offline-first dashboard in two parts:
   equity: type a ticker, and get dealer positioning, options-derived fear
   gauges, short interest and ownership, news and retail sentiment, event risk,
   and the divergences between them.
-
-Tab 3 remains a reserved placeholder.
+- **Tab 3 — NEWS SCREENER** widens the lens to eight cross-asset topic panels —
+  US macro, equities and fixed income; Europe macro and markets; energy,
+  precious metals and industrial metals — each with recent headlines from
+  trusted publishers, live market levels, and *two* sentiment readings that
+  disagree on purpose.
 
 The domain spec is [`RESEARCH.md`](RESEARCH.md) — every Tab 1 panel implements a
 section of it. The verified data sources are in
@@ -180,6 +183,67 @@ mention velocity are meaningless as a point reading, so they report
 
 ---
 
+## Tab 3 — News Screener
+
+One **Refresh** press fans out to ~38 feeds across 12 workers and lands in about
+15 seconds, yielding roughly 900 headlines. Those are routed into eight panels,
+windowed to the last 48 hours, and cut to the newest 25 each.
+
+Sources are Google News queries scoped to a trusted-domain whitelist (Reuters,
+Bloomberg, FT, WSJ, CNBC, MarketWatch, AP, Barron's), the publishers' own feeds
+where they work, and the primary sources the wires paraphrase — the Fed, the
+ECB, the Bank of England and the EIA. Reuters and Bloomberg have no working
+public feed at all and are reachable only through a Google `site:` query.
+
+### The two readings, and why they disagree
+
+Every panel shows **tone** and an **asset read**, and the gap between them is the
+output.
+
+*Tone* is VADER with the macro lexicon: how positive the language is. *Asset
+read* is a rule layer that knows what the panel is about and maps each headline
+to a direction **for that panel's asset**. They routinely point opposite ways,
+because financial language and financial direction are not the same thing:
+
+| Headline | Tone | Asset read |
+|---|---|---|
+| `10-year Treasury yield inches higher` | neutral/positive | **bearish bonds** |
+| `Gold rises on weaker dollar as rate-cut bets firm` | −0.66 | **+0.80 bullish gold** |
+| `Inflation cools more than expected` | negative ("cools") | **supportive** |
+| `OPEC+ agrees deeper output cuts` | negative ("cuts") | **bullish crude** |
+
+A live example from the verification session: Oil & Energy read **bearish tone
+(−0.15)** — Hormuz attacks, a struck ship, Somali piracy, all negative language —
+against **+0.78 bullish crude**, because a supply disruption is bullish oil. WTI
+was up 1.42% that session. Tone alone would have had the sign backwards.
+
+The same verb means opposite things in different panels: a rise in yields is
+bearish in US Fixed Income, a rise in crude is bullish in Oil & Energy. That is
+why there is no single global sentiment score here.
+
+### Coverage is the honest limit
+
+Most headlines are not directional. `asset_read` returns `None` — **not `0.0`** —
+for those, and only the ones that fire a rule are averaged. Counting the rest as
+neutral would drag every panel toward the middle in proportion to how much
+off-topic news happened to land in it.
+
+The consequence is that coverage is often 10–30%, and it is reported next to
+every score, flagged `thin` below 25%, and warned about in the commentary. A
+reading of −0.80 from 2 of 15 headlines is two headlines, and the panel says so.
+
+Genuinely two-sided prints — a hot payrolls number is good for growth and bad
+for rate cuts — are scored at half weight and flagged rather than forced onto
+one side.
+
+### What it cannot do
+
+It is a bag of patterns, not a parser: no negation handling ("yields fail to
+rise"), no distinction between a forecast and a fact, and a headline about two
+assets moving opposite ways is resolved by word proximity rather than grammar.
+
+---
+
 ## Notable implementation details
 
 Several things here deviate from the obvious implementation because running
@@ -261,6 +325,44 @@ regression test.
   slice.** An active filer's most recent twenty EDGAR rows are all Form 4s; WEN
   had 35 earnings 8-Ks in its full submission list and none in the first twenty.
 
+- **Google ignores its own `when:` operator on a keyword query.** The US Fixed
+  Income topic query with `when:2d` returned 100 entries whose median age was
+  three months and whose oldest was eleven years — add keywords and Google
+  switches to all-time relevance ranking. It *is* honoured on a bare `site:`
+  query (`site:reuters.com when:1d` came back 98/98 inside 24 hours), which is
+  why `_feeds.py` has two query shapes. Nothing depends on the operator: the
+  48-hour window is applied locally and is the only real guarantee.
+
+- **Four RSS feeds return HTTP 200, valid XML, and year-old news.** WSJ's two
+  Dow Jones feeds and MarketWatch's realtime/marketpulse feeds had median entry
+  ages of ~1.5 years while leading with entirely credible market headlines
+  ("Jobless claims fall to lowest level since mid-May" — from eighteen months
+  earlier). Entry count cannot detect this; `probe_news.py` reports *newest*
+  age, which is what distinguishes a frozen archive from a quiet primary source.
+
+- **`asset_read` returns `None`, never `0.0`, for an undirected headline.**
+  Most headlines say nothing about the asset. Scoring them as neutral would
+  drag every panel toward the middle in proportion to how much off-topic news
+  landed in it, making a strong reading arithmetically impossible. The cost is
+  that coverage is often 10–30%, which is reported rather than hidden.
+
+- **"Treasury yields" is one subject, not two that cancel.** The yield pattern
+  carries −1 and the bond pattern +1, and without masking each matched span as
+  it is consumed both fire on the same three words and sum to exactly zero —
+  rendering as a confident "no view" on every rates headline.
+
+- **Five subject nouns are neutralised in the macro lexicon.** Stock VADER
+  scores `crude` at −2.7 ("crude behaviour"), `credit` at +1.6 ("credit to
+  her"), `treasuries` at +0.9 and `energy` at +1.1. On a single-topic corpus the
+  subject appears in nearly every headline, so these are not noise — they are a
+  fixed bias in one direction per panel. `NEWS` keeps the original values, where
+  the ordinary-English meaning is the right one.
+
+- **The Europe panels are gated on nothing.** An earlier context check required
+  an explicit European marker before allowing a Europe panel, which dropped
+  "DAX climbs to record high" outright — the index name *is* the marker. The
+  gate now only ever removes US panels from a plainly European story.
+
 ---
 
 ## Layout
@@ -288,28 +390,41 @@ panels/
   ticker_news.py        Google News + Seeking Alpha + Finviz, deduped
   ticker_events.py      Earnings, implied move, classified SEC filings
   ticker_sentiment.py   Composite score + divergence rules (pure)
+  --- Tab 3 ---
+  _feeds.py             Feed registry, Google query shapes, parallel fetcher
+  _asset_read.py        Per-panel directional rules (movers/subjects/drivers)
+  market_context.py     Batched yfinance quote strips, curves and ratios
+  news_screener.py      Routing, windowing, both readings, commentary (pure)
   test_*.py             One test module per panel
 static/                 index.html, app.js, style.css (no frameworks, no CDN)
 tools/
   probe_sources.py      Endpoint verification
   probe_vx.py           VIX futures alternatives
+  probe_news.py         Tab 3 feed health: entries, freshness, frozen archives
   calibrate.py          Live magnitudes vs commentary thresholds
   smoke.py              Run any panel's refresh() against live data
   check_contract.py     Assert live payloads carry every field app.js reads
   render_check.js       Execute the renderers and validate their SVG output
 ```
 
+`ticker_news.py` (Tab 2) and `news_screener.py` (Tab 3) share `_feeds.py`'s RSS
+plumbing — one `parse_feed`, one `dedupe`, one Google-suffix strip — so the two
+tabs cannot drift apart on the details that bit once already.
+
 ## Tests
 
 ```bash
-python -m pytest panels/ -q                     # 316 tests, no network
+python -m pytest panels/ -q                     # 413 tests, no network
 python tools/check_contract.py                  # Tab 1 field contract
 python tools/check_contract.py --panels tab2    # Tab 2, after an Analyse
+python tools/check_contract.py --panels tab3    # Tab 3, after a Refresh
 python tools/check_contract.py --panels all
 node tools/render_check.js                      # renderer output + geometry
 python tools/calibrate.py                       # live magnitudes vs thresholds
+python tools/probe_news.py                      # Tab 3 feed health
 python tools/smoke.py [panel ...]               # Tab 1 panels against live data
 python tools/smoke.py t2 NVDA WEN QQQ           # Tab 2 across three shapes
+python tools/smoke.py t3                        # Tab 3 news screener
 ```
 
 The three smoke symbols are chosen to exercise different shapes: NVDA is a deep,
@@ -317,9 +432,16 @@ dense chain; WEN is a low-priced small cap with a thin chain, a 34% short float
 and an activist 13D; QQQ is an ETF, which has no issuer filings and no Finviz
 analyst coverage, so it exercises the weight-renormalisation path.
 
-Tab 2's contract check is opt-in because its panels hold no payload until a
-ticker has been analysed — requiring them by default would fail the Tab 1 check
-on a fresh database.
+The Tab 2 and Tab 3 contract checks are opt-in because their panels hold no
+payload until they have been refreshed once — requiring them by default would
+fail the Tab 1 check on a fresh database.
+
+`probe_news.py` reports, per feed, the entry count, the count inside the 48-hour
+window, and the **newest** and median entry ages. The newest/median split is the
+point: it separates a legitimately quiet primary source (the Fed between
+meetings — recent newest, old median) from a *frozen* archive that returns HTTP
+200, parses cleanly and serves eighteen-month-old headlines that read as
+current. Four feeds were caught and removed that way; see `DATA_SOURCES.md` §12c.
 
 `render_check.js` runs the real renderers against live payloads under a stubbed
 DOM and checks for NaN coordinates, `undefined` in labels, unbalanced SVG tags,

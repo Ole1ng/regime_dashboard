@@ -26,7 +26,7 @@
       </button>
       <button class="tab" role="tab" data-tab="tab3"
               aria-selected="false" aria-controls="panel-tab3" id="tabbtn-tab3">
-        TAB 3
+        NEWS SCREENER
       </button>
     </nav>
 
@@ -47,7 +47,11 @@
           <span class="btn-label">Analyse</span>
         </button>
       </div>
-      <div class="tab-controls" data-tab-controls="tab3" hidden></div>
+      <div class="tab-controls" data-tab-controls="tab3" hidden>
+        <button id="btn-tab3" type="button" class="btn">
+          <span class="btn-label">Refresh</span>
+        </button>
+      </div>
     </div>
   </header>
 
@@ -355,16 +359,163 @@
       </div>
     </section>
 
-    <!-- ===================== TAB 3 — reserved ===================== -->
+    <!-- ===================== TAB 3 — news screener ===================== -->
+    <!-- Eight structurally identical panels, so they share one renderer
+         (renderNewsPanel) rather than each having its own. -->
     <section class="tabpanel" id="panel-tab3" role="tabpanel"
              aria-labelledby="tabbtn-tab3" hidden>
       <div class="grid">
-        <section class="panel panel-full placeholder">
-          <div class="panel-head"><h2>Tab 3</h2></div>
+
+        <section class="panel panel-half" id="panel-t3_us_macro"
+                 aria-labelledby="h-t3-us-macro">
+          <div class="panel-head">
+            <h2 id="h-t3-us-macro">US Macro</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <section class="panel panel-half" id="panel-t3_us_equities"
+                 aria-labelledby="h-t3-us-equities">
+          <div class="panel-head">
+            <h2 id="h-t3-us-equities">US Equities</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <section class="panel panel-half" id="panel-t3_us_rates"
+                 aria-labelledby="h-t3-us-rates">
+          <div class="panel-head">
+            <h2 id="h-t3-us-rates">US Fixed Income</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <section class="panel panel-half" id="panel-t3_eu_macro"
+                 aria-labelledby="h-t3-eu-macro">
+          <div class="panel-head">
+            <h2 id="h-t3-eu-macro">Europe Macro</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <section class="panel panel-half" id="panel-t3_eu_markets"
+                 aria-labelledby="h-t3-eu-markets">
+          <div class="panel-head">
+            <h2 id="h-t3-eu-markets">Europe Equities &amp; Fixed Income</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <section class="panel panel-half" id="panel-t3_energy"
+                 aria-labelledby="h-t3-energy">
+          <div class="panel-head">
+            <h2 id="h-t3-energy">Oil &amp; Energy</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <section class="panel panel-half" id="panel-t3_precious"
+                 aria-labelledby="h-t3-precious">
+          <div class="panel-head">
+            <h2 id="h-t3-precious">Precious Metals</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <section class="panel panel-half" id="panel-t3_metals"
+                 aria-labelledby="h-t3-metals">
+          <div class="panel-head">
+            <h2 id="h-t3-metals">Industrial Metals</h2>
+            <div class="panel-meta">
+              <span class="badge" data-badge></span>
+              <span class="updated" data-updated>—</span>
+            </div>
+          </div>
+          <div class="panel-body" data-body aria-live="polite"></div>
+        </section>
+
+        <!-- Caveats (collapsed by default) -->
+        <section class="panel panel-full" id="panel-t3-caveats"
+                 aria-labelledby="h-t3-caveats">
+          <div class="panel-head">
+            <h2 id="h-t3-caveats">How to read these panels</h2>
+          </div>
           <div class="panel-body">
-            <p class="empty-note">Reserved — coming soon.</p>
+            <details class="caveats">
+              <summary>Two sentiment numbers, and why they disagree</summary>
+              <ul>
+                <li><strong>TONE is the language; ASSET READ is the direction.</strong>
+                  Tone is VADER with a macro lexicon — how positive the words are.
+                  Asset read is a rule layer that maps each headline to a
+                  direction <em>for the asset this panel covers</em>. "Gold rises
+                  on weaker dollar as rate-cut bets firm" is negative language
+                  describing a bullish setup, and the two numbers say so.</li>
+                <li><strong>The disagreement is the point.</strong> When tone and
+                  direction line up, the panel is telling you what you already
+                  saw in the price. When they diverge, the coverage is framing a
+                  move in the opposite emotional register — that is flagged
+                  explicitly.</li>
+                <li><strong>Check coverage before trusting the direction.</strong>
+                  Most headlines are not directional at all, and only those that
+                  fire a rule are scored. A reading drawn from 2 of 15 headlines
+                  is two headlines, not a signal, and is labelled thin.</li>
+                <li><strong>Signs are per panel, not universal.</strong> A rise in
+                  yields is bearish in US Fixed Income; a rise in crude is bullish
+                  in Oil &amp; Energy. The same verb means opposite things in
+                  different panels, which is exactly why one global sentiment
+                  score would be useless here.</li>
+                <li><strong>It is pattern matching, not comprehension.</strong> No
+                  negation handling ("yields fail to rise"), no distinction
+                  between a forecast and a fact, and a headline about two assets
+                  moving opposite ways is resolved by word proximity rather than
+                  grammar.</li>
+                <li><strong>Some prints are genuinely two-sided.</strong> A hot
+                  payrolls number is good for growth and bad for rate cuts. Those
+                  are scored at half weight and flagged rather than forced to
+                  pick a side.</li>
+                <li><strong>48 hours, newest 25 per panel.</strong> Undated items
+                  are dropped rather than assumed recent. On a quiet weekend the
+                  niche panels go thin, and say so.</li>
+                <li><strong>Google's <code>when:</code> filter is not honoured on
+                  keyword queries</strong> — it returned eleven-year-old articles
+                  during testing. Recency here comes from a hard timestamp
+                  window applied locally, never from the feed's own filtering.</li>
+                <li><strong>Market levels are daily closes</strong>, not live
+                  quotes, and futures and cash indices keep different holiday
+                  calendars — so a strip row can lag its panel by a session.</li>
+              </ul>
+            </details>
           </div>
         </section>
+
       </div>
     </section>
 

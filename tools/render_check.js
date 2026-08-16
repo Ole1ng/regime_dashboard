@@ -30,7 +30,8 @@ const api = new Function(
         " renderCftcPositioning, renderVix, renderCorrelation, renderCalendar," +
         " scoreGauge, subscoreBars, bullBearBar, historySpark, termCurve," +
         " divergenceList, renderT2Sentiment, renderT2Positioning, renderT2Vol," +
-        " renderT2Squeeze, renderT2Social, renderT2Events, renderT2News };")();
+        " renderT2Squeeze, renderT2Social, renderT2Events, renderT2News," +
+        " quoteStrip, assetReadBar, renderNewsPanel };")();
 
 function fetchState() {
   return new Promise((resolve, reject) => {
@@ -228,6 +229,18 @@ function check(name, html) {
     ["t2_social", api.renderT2Social, P("t2_social")],
     ["t2_events", api.renderT2Events, P("t2_events")],
     ["t2_news", api.renderT2News, P("t2_news")],
+    // Tab 3 — one renderer, eight payloads. Each is checked separately because
+    // their shapes differ where it matters: a panel with no quote strip, or one
+    // where no headline fired a rule, takes a different path through the same
+    // function.
+    ["t3_us_macro", api.renderNewsPanel, P("t3_us_macro")],
+    ["t3_us_equities", api.renderNewsPanel, P("t3_us_equities")],
+    ["t3_us_rates", api.renderNewsPanel, P("t3_us_rates")],
+    ["t3_eu_macro", api.renderNewsPanel, P("t3_eu_macro")],
+    ["t3_eu_markets", api.renderNewsPanel, P("t3_eu_markets")],
+    ["t3_energy", api.renderNewsPanel, P("t3_energy")],
+    ["t3_precious", api.renderNewsPanel, P("t3_precious")],
+    ["t3_metals", api.renderNewsPanel, P("t3_metals")],
   ];
   for (const [name, fn, payload] of panels) {
     const b = body();
@@ -250,6 +263,46 @@ function check(name, html) {
     } catch (e) {
       failures++;
       console.log(`  FAIL  ${name} threw on null: ${e.message}`);
+    }
+  }
+
+  // The two Tab 3 shapes a live payload may not happen to exercise on any given
+  // day. Both are normal states, not errors: an undirected panel is what a
+  // quiet weekend produces, and the quote strip disappears whenever yfinance is
+  // unreachable. Neither may render "null" or "undefined" into the page.
+  console.log("\nTab 3 edge cases:");
+  {
+    const base = P("t3_us_macro");
+    if (!base) {
+      console.log("  skip  no t3 payload yet (refresh Tab 3 first)");
+    } else {
+      const undirected = JSON.parse(JSON.stringify(base));
+      undirected.asset = { score: null, label: "No directional read",
+                           noun: "the outlook", coverage: 0, n_fired: 0,
+                           n: undirected.count, thin: true, two_sided: 0,
+                           bull: 0, bear: 0 };
+      undirected.divergence = null;
+      undirected.salient = (undirected.salient || []).map(
+        (h) => ({ ...h, asset: null, drivers: [] }));
+
+      const noQuotes = JSON.parse(JSON.stringify(base));
+      noQuotes.quotes = [];
+
+      const empty = JSON.parse(JSON.stringify(base));
+      empty.empty = true; empty.count = 0; empty.items = []; empty.salient = [];
+
+      for (const [name, payload] of [["no directional read", undirected],
+                                     ["no quote strip", noQuotes],
+                                     ["empty panel", empty]]) {
+        const b = body();
+        try {
+          api.renderNewsPanel(b, payload);
+          check(`renderNewsPanel (${name})`, b.innerHTML);
+        } catch (e) {
+          failures++;
+          console.log(`  FAIL  renderNewsPanel (${name}) threw: ${e.message}`);
+        }
+      }
     }
   }
 
